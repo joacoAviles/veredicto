@@ -24,11 +24,12 @@ await migrate(pool);
 await presetAccount(pool, env.ADMIN_PASSWORD);
 
 const publicUrl = (env.URL_PUBLICA || "").replace(/\/$/, "");
+const themeDir = env.TEMA_DIR || "/tema";
 const app = createApp(pool, {
   tz, publicUrl,
   nombre: env.NOMBRE || "Juez del Tiempo",
   theme: env.TEMA || "neutro",
-  themeDir: env.TEMA_DIR || "/tema",
+  themeDir,
   secureCookie: env.COOKIE_SEGURA ? env.COOKIE_SEGURA === "1" : undefined,
 });
 const port = Number(env.PORT || 8080);
@@ -53,8 +54,8 @@ const every = (ms, name, fn) => {
 };
 every(10 * 60_000, "calendarios", async () => { await refreshCalendars(pool, tz); changed("calendarios"); });
 every(15_000, "notion", async () => { const r = await pushPending(pool); if (r.enviados || r.errores) changed("notion"); });
-every(60_000, "vigilante", () => vigilar(pool, { tz, publicUrl }));
-every(5 * 60_000, "armado", () => armadoMatinal(pool, tz, { publicUrl }));
+every(60_000, "vigilante", () => vigilar(pool, { tz, publicUrl, themeDir }));
+every(5 * 60_000, "armado", () => armadoMatinal(pool, tz, { publicUrl, themeDir }));
 
 const bye = async () => { await pool.end().catch(() => {}); process.exit(0); };
 process.on("SIGTERM", bye);

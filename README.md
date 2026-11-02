@@ -46,6 +46,21 @@ Crea una carpeta `tema/` junto a `compose.yaml` con un `tema.css` (copia `themes
 
 Variables que puedes cambiar: `--fondo`, `--superficie`, `--texto`, `--suave`, `--linea`, `--acento`, `--acento-texto`, `--peligro`, `--ok`, `--fuente`, `--fuente-titulos`, `--mayus-titulos`, `--radio`, `--sombra`, `--logo`.
 
+## Avisos personalizables
+
+Cada aviso (antes de algo agendado, empezó lo agendado, sin registrar ×3 niveles, se pasó de lo estimado, resumen de la mañana) tiene título, mensaje, prioridad/sonido, etiquetas (emoji de ntfy) y hasta 3 botones. Tres capas, la última manda:
+
+1. **Fábrica** (`src/plantillas.js`).
+2. **Equipo**: `tema/avisos.json` (ver `themes/avisos.ejemplo.json`). Así cada equipo trae su voz junto a su tema visual.
+3. **Tuyas**: Ajustes → Personalizar → Avisos. Botón «Probar» manda uno de prueba; «Volver a la del equipo» deshace.
+
+Variables: `{titulo} {hora} {fin} {minutos} {sin_registrar} {sugerencia} {lleva} {estimado} {agenda} {nombre}`.
+Botones: `iniciar sugerencia1 sugerencia2 seguir parar silenciar30 silenciar60 armar abrir`.
+
+## Qué aprende el algoritmo
+
+Ajustes → Personalizar → Qué aprende el algoritmo. Muestra los hábitos detectados (lo mismo, a una hora parecida, varios días) y por cada tarea o rutina eliges: **Agendar solo** (entra en «Armar mi día»), **Solo sugerir** (aparece en Hoy y en los botones de los avisos) o **Ignorar**. También ajustas historial, mínimo de días, constancia, tolerancia de hora y qué hacer con un hábito nuevo.
+
 ## Cómo funciona
 
 - PostgreSQL es la única verdad. Una sola actividad abierta a la vez (lo garantiza la base de datos).

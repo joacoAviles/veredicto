@@ -205,3 +205,25 @@ test("plantilla y feed de calendario", { skip: !URL }, async () => {
   assert.match(ics.body, /BEGIN:VCALENDAR/);
   assert.equal((await call("/cal/malo.ics", { auth: "none" })).status, 404);
 });
+
+test("plantillas: editar, probar y volver a la del equipo; modos del algoritmo", { skip: !URL }, async () => {
+  let r = await call("/api/plantillas");
+  assert.equal(r.body.efectivas.eventos.agendado.titulo, "Agendado: {titulo}");
+  r = await call("/api/plantillas", { method: "PUT", body: { global: { prefijo: "JDT · " }, eventos: { inactivo1: { titulo: "Hey {sugerencia}", acciones: ["sugerencia1", "abrir"] } } } });
+  assert.equal(r.body.efectivas.eventos.inactivo1.titulo, "Hey {sugerencia}");
+  sent.length = 0;
+  r = await call("/api/plantillas/probar", { method: "POST", body: { evento: "inactivo1" } });
+  assert.equal(r.status, 200);
+  assert.match(sent[0].titulo, /^\[prueba\] JDT · Hey /);
+  assert.ok(sent[0].acciones.at(-1).vista);
+  r = await call("/api/plantillas/inactivo1", { method: "DELETE" });
+  assert.equal(r.body.efectivas.eventos.inactivo1.titulo, "¿Qué estás haciendo?");
+  const it = (await pool.query("SELECT id FROM items WHERE title='Transporte' AND kind='rutina'")).rows[0];
+  r = await call("/api/prediccion", { method: "PUT", body: { modos: { [it.id]: "nunca" } } });
+  assert.equal(r.status, 200);
+  r = await call("/api/prediccion");
+  assert.equal(r.body.items.find((i) => i.id === it.id).modo, "nunca");
+  r = await call("/api/armar");
+  assert.ok(!r.body.plan.some((p) => p.item_id === it.id));
+});
+

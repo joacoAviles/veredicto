@@ -1,0 +1,15 @@
+{
+  "_leeme": "Copia este archivo a tu carpeta tema/ como avisos.json. Solo pon lo que quieras cambiar; lo demás queda de fábrica. Cada persona puede editar encima desde Ajustes → Avisos.",
+  "global": { "prefijo": "", "icono": true },
+  "eventos": {
+    "previo":    { "minutos": 5, "titulo": "En {minutos} min: {titulo}", "mensaje": "{hora}–{fin}", "acciones": ["iniciar", "silenciar30"] },
+    "agendado":  { "titulo": "Agendado: {titulo}", "mensaje": "Desde las {hora} hasta las {fin}. ¿Lo inicio?", "prioridad": 4, "tags": "calendar" },
+    "inactivo1": { "titulo": "¿Qué estás haciendo?", "mensaje": "Llevas {sin_registrar} sin registrar.", "prioridad": 3 },
+    "inactivo2": { "titulo": "Sigues sin registrar", "prioridad": 4 },
+    "inactivo3": { "titulo": "Esto no se está midiendo", "prioridad": 5, "tags": "rotating_light" },
+    "excedido":  { "factor": 1.5, "titulo": "{titulo}: ya van {lleva}", "mensaje": "Estimaste {estimado}. ¿Sigues o paras?" },
+    "armado":    { "titulo": "Tu día ya está armado", "mensaje": "{agenda}", "acciones": ["abrir"] }
+  },
+  "_acciones_disponibles": ["iniciar", "sugerencia1", "sugerencia2", "seguir", "parar", "silenciar30", "silenciar60", "armar", "abrir"],
+  "_variables": ["titulo", "hora", "fin", "minutos", "sin_registrar", "sugerencia", "lleva", "estimado", "agenda", "nombre"]
+}

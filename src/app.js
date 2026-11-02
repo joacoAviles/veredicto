@@ -12,7 +12,9 @@ import { bus, changed, armarHoy } from "./servicios.js";
 import { refreshCalendars, buildICS } from "./conectores/ical.js";
 import { setupNotion, pushPending } from "./conectores/notion.js";
 import { enviar } from "./conectores/avisos.js";
-import { DEFAULTS, vigilar } from "./vigilante.js";
+import { DEFAULTS, vigilar, construirAviso, entregar } from "./vigilante.js";
+import { EVENTOS, ACCIONES, VARIABLES, merge, equipo, sanitize as sanitizePlantillas } from "./plantillas.js";
+import { getPrediccion, habitosConModo, sanitizePred, modoDe } from "./prediccion.js";
 import { fmtDur, fmtHora, isValidZone, startOfDay, addDays } from "./time.js";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -311,7 +313,7 @@ export function createApp(pool, opts = {}) {
     res.json({ chat: String(chat.id), nombre: chat.first_name || chat.title || "" });
   }));
   app.post("/api/vigilante/revisar", need, wrap(async (req, res) => {
-    const r = await vigilar(pool, { tz: cfg.tz, publicUrl: cfg.publicUrl, send: cfg.send });
+    const r = await vigilar(pool, { tz: cfg.tz, publicUrl: cfg.publicUrl, themeDir: cfg.themeDir, send: cfg.send });
     res.json({ motivo: r.motivo, aviso: r.aviso?.titulo || null });
   }));
   app.post("/api/vigilante/silenciar", need, wrap(async (req, res) => {
@@ -321,6 +323,69 @@ export function createApp(pool, opts = {}) {
     res.json({ ok: true, hasta: Date.now() + min * 60000 });
   }));
   app.put("/api/onboarding", need, wrap(async (req, res) => { await setSetting(pool, "onboarding", { listo: !!req.body.listo, at: Date.now() }); res.json({ ok: true }); }));
+
+  // ---------- Plantillas de avisos ----------
+  const capas = async () => ({ equipo: await equipo(cfg.themeDir), tuyas: await getSetting(pool, "plantillas", null) });
+  app.get("/api/plantillas", need, wrap(async (req, res) => {
+    const c = await capas();
+    res.json({ efectivas: merge(c.equipo, c.tuyas), equipo: merge(c.equipo), fabrica: merge(), tuyas: c.tuyas || { global: {}, eventos: {} }, hay_equipo: !!c.equipo, acciones: ACCIONES, variables: VARIABLES, orden: Object.keys(EVENTOS) });
+  }));
+  app.put("/api/plantillas", need, wrap(async (req, res) => {
+    const nuevo = sanitizePlantillas(req.body);
+    const prev = (await getSetting(pool, "plantillas", null)) || { global: {}, eventos: {} };
+    const out = { global: { ...prev.global, ...nuevo.global }, eventos: { ...prev.eventos } };
+    for (const [k, v] of Object.entries(nuevo.eventos)) out.eventos[k] = { ...(prev.eventos?.[k] || {}), ...v };
+    await setSetting(pool, "plantillas", out);
+    const c = await capas();
+    res.json({ ok: true, efectivas: merge(c.equipo, c.tuyas) });
+  }));
+  app.delete("/api/plantillas/:evento", need, wrap(async (req, res) => {
+    // Vuelve a la plantilla del equipo (o de fábrica) para un evento, o para todos con "todo".
+    const prev = (await getSetting(pool, "plantillas", null)) || { global: {}, eventos: {} };
+    if (req.params.evento === "todo") await pool.query("DELETE FROM settings WHERE key='plantillas'");
+    else { delete prev.eventos[req.params.evento]; await setSetting(pool, "plantillas", prev); }
+    const c = await capas();
+    res.json({ ok: true, efectivas: merge(c.equipo, c.tuyas) });
+  }));
+  app.post("/api/plantillas/probar", need, wrap(async (req, res) => {
+    const key = req.body.evento;
+    if (!EVENTOS[key]) throw new core.HttpError(400, "Evento desconocido.");
+    const c = await capas();
+    const P = merge(c.equipo, c.tuyas, req.body.borrador ? sanitizePlantillas({ eventos: { [key]: req.body.borrador } }) : null);
+    P.eventos[key].activo = true;
+    const s = await st();
+    const now = Date.now();
+    const ej = s.sugerencias[0] || { title: "Transporte" };
+    const vars = {
+      titulo: s.current?.title || s.agenda.blocks[0]?.title || "Reunión de ejemplo", hora: fmtHora(now + 5 * 60000, cfg.tz), fin: fmtHora(now + 65 * 60000, cfg.tz),
+      minutos: P.eventos.previo.minutos || 5, sin_registrar: "32 min", sugerencia: ej.title, lleva: "1:30:00", estimado: "1:00:00",
+      agenda: "08:10 Transporte\n09:00 Reunión\n18:00 Gimnasio", nombre: cfg.nombre,
+    };
+    const aviso = construirAviso(P, key, vars, { ahora: { title: vars.titulo }, lista: [ej, { title: "Descanso" }], current: s.current || { state: "running", title: vars.titulo } });
+    aviso.titulo = "[prueba] " + aviso.titulo;
+    // Los botones de prueba silencian 1 minuto: no cambian lo que estás registrando.
+    aviso.acciones = aviso.acciones.map((a) => (a.abrir ? a : { ...a, accion: "silenciar", datos: { min: 1 } }));
+    const a = { ...DEFAULTS, ...(await getSetting(pool, "avisos", {})) };
+    const r = await entregar(pool, a, aviso, { publicUrl: cfg.publicUrl, plantillas: P, send: (cn, av) => cfg.send(cn, av, { fetcher: cfg.fetcher }) });
+    if (!r.envio.length) throw new core.HttpError(400, "No hay ningún canal configurado (paso 1).");
+    res.json({ resultado: r.envio, aviso: { titulo: r.final.titulo, mensaje: r.final.mensaje, acciones: r.final.acciones.map((x) => x.label) } });
+  }));
+
+  // ---------- Qué aprende el algoritmo ----------
+  app.get("/api/prediccion", need, wrap(async (req, res) => {
+    const pred = await getPrediccion(pool);
+    const hab = await habitosConModo(pool, Date.now(), cfg.tz, pred);
+    const items = (await pool.query("SELECT id, kind, title, hora, dias, est_min FROM items WHERE status NOT IN ('archivada') ORDER BY kind DESC, title")).rows;
+    res.json({
+      config: pred,
+      habitos: hab.map((h) => ({ ...h, hora: `${String(Math.floor(h.minuto / 60)).padStart(2, "0")}:${String(h.minuto % 60).padStart(2, "0")}` })),
+      items: items.map((i) => ({ id: i.id, kind: i.kind, title: i.title, hora: i.hora ? String(i.hora).slice(0, 5) : null, modo: modoDe(pred, i.id, { rutinaConHora: !!i.hora }), propio: !!pred.modos[i.id] })),
+    });
+  }));
+  app.put("/api/prediccion", need, wrap(async (req, res) => {
+    await setSetting(pool, "prediccion", sanitizePred(await getPrediccion(pool), req.body));
+    await done(res);
+  }));
 
   // ---------- Tokens para atajos ----------
   app.get("/api/tokens", need, wrap(async (req, res) => res.json((await pool.query("SELECT id,label,created_at,last_used_at FROM api_tokens ORDER BY created_at DESC")).rows)));
@@ -413,6 +478,7 @@ export function createApp(pool, opts = {}) {
     if (d.a === "iniciar") { const r = await viaTimer((q) => core.start(q, { itemId: d.p?.item_id || null, title: d.p?.title || null, source: "aviso" })); return `▶ ${r.item.title}`; }
     if (d.a === "seguir") { const r = await viaTimer((q) => core.resume(q)); return `▶ ${r.title}`; }
     if (d.a === "parar") { const r = await viaTimer((q) => core.stop(q)); return r ? `■ ${r.title}` : "No había nada corriendo."; }
+    if (d.a === "armar") { const r = await armarHoy(pool, cfg.tz, { aplicar: true }); return r.creados ? `Agendé ${r.creados} bloques.` : "No había nada nuevo que agendar."; }
     if (d.a === "silenciar") {
       const s = await getSetting(pool, "vigilante", {});
       await setSetting(pool, "vigilante", { ...s, silencio_hasta: Date.now() + (d.p?.min || 60) * 60000 });

@@ -1,16 +1,17 @@
 // Lo que ven la app, los atajos y el vigilante: siempre leído del servidor, nunca de una copia.
 import { startOfDay, addDays } from "./time.js";
-import { habits, sugerencias } from "./plan.js";
+import { sugerencias } from "./plan.js";
+import { getPrediccion, habitosConModo, paraSugerir, rutinasPermitidas } from "./prediccion.js";
 import { getSetting } from "./db.js";
 
 const ms = (d) => (d ? new Date(d).getTime() : null);
 
-export async function sessionsForHabits(q, now) {
+export async function sessionsForHabits(q, now, dias = 35) {
   const r = await q.query(
     `SELECT s.item_id, s.title, s.started_at,
             COALESCE((SELECT SUM(EXTRACT(EPOCH FROM (g.ended_at-g.started_at))) FROM segments g WHERE g.session_id=s.id),0)*1000 AS dur_ms
      FROM sessions s WHERE s.state='done' AND s.started_at > $1`,
-    [new Date(now - 35 * 86_400_000)],
+    [new Date(now - (dias + 1) * 86_400_000)],
   );
   return r.rows.map((x) => ({ item_id: x.item_id, title: x.title, started_at: ms(x.started_at), dur_ms: Number(x.dur_ms) }));
 }
@@ -40,7 +41,8 @@ export async function agendaRange(q, from, to) {
 
 export async function buildState(q, { tz, now = Date.now() }) {
   const day = startOfDay(now, tz), tomorrow = addDays(day, 1, tz);
-  const [items, current, agenda, done, captures, outbox, cals, notion, avisos, hist] = await Promise.all([
+  const pred = await getPrediccion(q);
+  const [items, current, agenda, done, captures, outbox, cals, notion, avisos, hab] = await Promise.all([
     q.query("SELECT * FROM items WHERE status <> 'archivada' ORDER BY kind, (status='hecha'), (status='en curso') DESC, due_date NULLS LAST, created_at DESC LIMIT 500"),
     currentSession(q),
     agendaRange(q, day, tomorrow),
@@ -53,10 +55,9 @@ export async function buildState(q, { tz, now = Date.now() }) {
     q.query("SELECT id, name, last_ok_at, last_error FROM calendars ORDER BY created_at"),
     getSetting(q, "notion"),
     getSetting(q, "avisos"),
-    sessionsForHabits(q, now),
+    habitosConModo(q, now, tz, pred),
   ]);
   const rutinas = items.rows.filter((i) => i.kind === "rutina" && i.status !== "archivada");
-  const hab = habits(hist, now, tz);
   const medido = done.rows.reduce((a, g) => a + Math.max(0, Math.min(ms(g.ended_at) || now, tomorrow) - Math.max(ms(g.started_at), day)), 0);
   const ob = Object.fromEntries(outbox.rows.map((r) => [r.status, r]));
   return {
@@ -73,7 +74,7 @@ export async function buildState(q, { tz, now = Date.now() }) {
       tramos: done.rows.map((g) => ({ session_id: g.id, item_id: g.item_id, title: g.title, start: ms(g.started_at), end: ms(g.ended_at), source: g.source })),
     },
     captures: captures.rows.map((c) => ({ id: c.id, kind: c.kind, text: c.text, body: c.body, source: c.source, status: c.status, at: ms(c.created_at), en_notion: !!c.notion_id })),
-    sugerencias: sugerencias(hab, rutinas, now, tz),
+    sugerencias: sugerencias(paraSugerir(hab), rutinasPermitidas(rutinas.map((r) => ({ ...r, hora: r.hora ? String(r.hora).slice(0, 5) : null })), pred, "sugerir"), now, tz, 3, pred.radio),
     habitos: hab,
     conexiones: {
       notion: notion?.token ? { ok: true, pendientes: (ob.pendiente?.n || 0) + (ob.error?.n || 0), error: ob.error?.err || "" } : { ok: false },

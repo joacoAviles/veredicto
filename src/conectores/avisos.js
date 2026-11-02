@@ -19,9 +19,12 @@ async function ntfy(c, a, fetcher) {
     headers: { "Content-Type": "application/json", ...(c.token ? { Authorization: `Bearer ${c.token}` } : {}) },
     body: JSON.stringify({
       topic: c.topic, title: a.titulo, message: a.mensaje, priority: a.prioridad || 3,
-      tags: a.prioridad >= 5 ? ["rotating_light"] : ["stopwatch"],
+      tags: a.tags ? String(a.tags).split(",").map((t) => t.trim()).filter(Boolean) : a.prioridad >= 5 ? ["rotating_light"] : ["stopwatch"],
       ...(a.abrir ? { click: a.abrir } : {}),
-      actions: (a.acciones || []).slice(0, 3).map((x) => ({ action: "http", label: x.label.slice(0, 40), url: x.url, method: "POST", clear: true })),
+      ...(a.icono ? { icon: a.icono } : {}),
+      actions: (a.acciones || []).slice(0, 3).map((x) => x.vista
+        ? { action: "view", label: x.label.slice(0, 40), url: x.url, clear: true }
+        : { action: "http", label: x.label.slice(0, 40), url: x.url, method: "POST", clear: true }),
     }),
     signal: AbortSignal.timeout(15_000),
   });

@@ -63,7 +63,11 @@ let es = null, refrescando = null;
 async function refrescar() {
   clearTimeout(refrescando);
   refrescando = setTimeout(async () => {
-    try { S = await api("/api/estado"); render(); } catch {}
+    try {
+      S = await api("/api/estado");
+      // En Ajustes hay formularios a medio llenar: se actualizan los datos sin redibujar.
+      if (!location.hash.startsWith("#ajustes")) render();
+    } catch {}
   }, 120);
 }
 function conectarEnVivo() {
@@ -101,11 +105,13 @@ function render() {
   clearInterval(tick);
   if (!sesion.dentro) { $("#nav").hidden = true; vista.replaceChildren(sesion.cuenta ? vistaEntrar() : vistaInstalar()); return; }
   $("#nav").hidden = false;
-  const v = (location.hash.slice(1).split(/[?&]/)[0] || "hoy");
+  const [v0, sub] = location.hash.slice(1).split(/[?&]/)[0].split("/");
+  const v = v0 || "hoy";
   for (const a of document.querySelectorAll("#nav a")) a.classList.toggle("activa", a.dataset.v === v);
   const foco = document.activeElement?.id, val = foco && document.activeElement.value;
   const vistas = { hoy: vistaHoy, tareas: vistaTareas, bandeja: vistaBandeja, registro: vistaRegistro, ajustes: vistaAjustes };
-  vista.replaceChildren(...[].concat((vistas[v] || vistaHoy)()));
+  const sub_ = { "ajustes/avisos": vistaPlantillas, "ajustes/algoritmo": vistaAlgoritmo }[`${v}/${sub}`];
+  vista.replaceChildren(...[].concat((sub_ || vistas[v] || vistaHoy)()).filter(Boolean));
   // Mantiene lo que estabas escribiendo si llega una actualización en vivo.
   if (foco) { const el = document.getElementById(foco); if (el) { if (val != null) el.value = val; el.focus(); } }
 }
@@ -350,6 +356,10 @@ function vistaAjustes() {
     paso(2, listo.cal, "Calendarios (Google, iCloud, Outlook)", pasoCalendarios()),
     paso(3, listo.notion, "Notion", pasoNotion()),
     paso(4, listo.atajos, "Atajos: Siri, Android y reloj", pasoAtajos()),
+    h("section", { class: "tarjeta" }, h("h3", {}, "Personalizar"),
+      h("ul", { class: "lista" },
+        h("li", {}, h("a", { class: "que", href: "#ajustes/avisos" }, "Avisos: textos, sonido y botones", h("small", {}, "Qué dice cada aviso y qué botones trae")), h("span", {}, "›")),
+        h("li", {}, h("a", { class: "que", href: "#ajustes/algoritmo" }, "Qué aprende el algoritmo", h("small", {}, "Qué puede agendar solo, qué solo sugerir y qué ignorar")), h("span", {}, "›")))),
     h("section", { class: "tarjeta" }, h("h3", {}, "Tu agenda en otros calendarios"),
       h("p", { class: "suave" }, "Suscríbete a este enlace desde Google Calendar, Apple o Outlook para ver tus bloques y lo medido."),
       feedUrl ? h("code", { class: "codigo" }, feedUrl) : h("button", { onclick: (e) => act(e.target, async () => { feedUrl = (await api("/api/feed")).url; }) }, "Mostrar enlace")),
@@ -465,6 +475,94 @@ function pasoAtajos() {
       : h("div", { class: "fila" },
         h("input", { id: "tok-label", placeholder: "iPhone, Android, Reloj…", class: "crece" }),
         h("button", { class: "primario", onclick: (e) => act(e.target, async () => { tokenNuevo = await api("/api/tokens", { method: "POST", body: { label: $("#tok-label").value || "Atajo" } }); avisosCfg.tokens = 1; }) }, "Crear token")),
+  ];
+}
+
+// ---------- Avisos: plantillas ----------
+let PL = null;
+const PRIORIDADES = { 1: "1 · mínima (sin sonido)", 2: "2 · baja", 3: "3 · normal", 4: "4 · alta", 5: "5 · urgente (insiste)" };
+function vistaPlantillas() {
+  if (!PL) { api("/api/plantillas").then((r) => { PL = r; render(); }).catch((e) => toast(e.message, true)); return h("p", { class: "cargando" }, "Cargando…"); }
+  const E = PL.efectivas, tuyas = PL.tuyas.eventos || {};
+  const prefijo = h("input", { id: "pl-prefijo", value: E.global.prefijo || "", placeholder: "Ej: JOACO · " });
+  const icono = h("input", { id: "pl-icono", type: "checkbox", style: "width:auto", checked: E.global.icono !== false });
+  const guardarGlobal = (e) => act(e.target, async () => { const r = await api("/api/plantillas", { method: "PUT", body: { global: { prefijo: prefijo.value, icono: icono.checked } } }); PL.efectivas = r.efectivas; PL = null; }, "Guardado.");
+  const evento = (key) => {
+    const t = E.eventos[key], f = PL.equipo.eventos[key], propio = !!tuyas[key];
+    const id = (x) => `pl-${key}-${x}`;
+    const activo = h("input", { id: id("activo"), type: "checkbox", style: "width:auto", checked: t.activo !== false });
+    const titulo = h("input", { id: id("titulo"), value: t.titulo });
+    const mensaje = h("textarea", { id: id("mensaje"), style: "min-height:3.5em" }); mensaje.value = t.mensaje;
+    const prio = h("select", { id: id("prio") }, Object.entries(PRIORIDADES).map(([n, l]) => h("option", { value: n, selected: Number(n) === t.prioridad }, l)));
+    const tags = h("input", { id: id("tags"), value: t.tags || "", placeholder: "stopwatch, fire…" });
+    const acc = [0, 1, 2].map((i) => h("select", { id: id("acc" + i) }, h("option", { value: "" }, "—"), Object.entries(PL.acciones).map(([k, l]) => h("option", { value: k, selected: t.acciones?.[i] === k }, l))));
+    const extra = key === "previo" ? h("input", { id: id("min"), type: "number", min: 1, max: 120, value: t.minutos })
+      : key === "excedido" ? h("input", { id: id("fac"), type: "number", min: 1, max: 5, step: 0.1, value: t.factor }) : null;
+    const leer = () => ({
+      activo: activo.checked, titulo: titulo.value, mensaje: mensaje.value, prioridad: Number(prio.value), tags: tags.value,
+      acciones: acc.map((x) => x.value).filter(Boolean), ...(key === "previo" ? { minutos: Number(extra.value) } : {}), ...(key === "excedido" ? { factor: Number(extra.value) } : {}),
+    });
+    return h("details", { class: "tarjeta", style: "padding:.6rem 1rem" },
+      h("summary", { style: "color:var(--texto);font-weight:700" }, t.activo === false ? "○ " : "● ", t.nombre, propio ? h("span", { class: "etiqueta", style: "margin-left:.5em" }, "editado") : null),
+      h("p", { class: "suave" }, t.ayuda),
+      h("label", {}, activo, " Activo"),
+      extra ? h("div", {}, h("label", { for: extra.id }, key === "previo" ? "Minutos antes" : "Avisar al pasar de lo estimado ×"), extra) : null,
+      h("label", { for: titulo.id }, "Título"), titulo,
+      h("label", { for: mensaje.id }, "Mensaje"), mensaje,
+      h("div", { class: "col2" }, h("div", {}, h("label", { for: prio.id }, "Prioridad (sonido)"), prio), h("div", {}, h("label", { for: tags.id }, "Etiquetas ntfy (emoji)"), tags)),
+      h("label", {}, "Botones (hasta 3, en orden)"), h("div", { style: "display:grid;gap:.4rem" }, acc),
+      h("p", { class: "suave" }, "Del equipo: «", f.titulo, "»"),
+      h("div", { class: "fila", style: "flex-wrap:wrap" },
+        h("button", { class: "primario", onclick: (e) => act(e.target, async () => { const r = await api("/api/plantillas", { method: "PUT", body: { eventos: { [key]: leer() } } }); PL = { ...PL, efectivas: r.efectivas, tuyas: { ...PL.tuyas, eventos: { ...tuyas, [key]: leer() } } }; }, "Guardado.") }, "Guardar"),
+        h("button", { onclick: (e) => act(e.target, async () => { const r = await api("/api/plantillas/probar", { method: "POST", body: { evento: key, borrador: leer() } }); toast(`Enviado: ${r.aviso.titulo}`); }) }, "Probar"),
+        propio ? h("button", { onclick: (e) => act(e.target, async () => { await api(`/api/plantillas/${key}`, { method: "DELETE" }); PL = null; }, "Restaurado.") }, "Volver a la del equipo") : null));
+  };
+  return [
+    h("p", {}, h("a", { href: "#ajustes" }, "‹ Ajustes")),
+    h("section", { class: "tarjeta" }, h("h1", {}, "Avisos"),
+      h("p", { class: "suave" }, PL.hay_equipo ? "Partes de la plantilla de tu equipo (tema/avisos.json). Lo que edites aquí manda sobre ella." : "Partes de las plantillas de fábrica. Tu equipo puede poner las suyas en tema/avisos.json."),
+      h("details", {}, h("summary", {}, "Variables que puedes usar"), h("ul", {}, Object.entries(PL.variables).map(([k, d]) => h("li", {}, h("code", {}, `{${k}}`), " ", d)))),
+      h("label", { for: "pl-prefijo" }, "Prefijo de todos los títulos"), prefijo,
+      h("label", {}, icono, " Mostrar el ícono de la app en el aviso (ntfy)"),
+      h("p"), h("button", { onclick: guardarGlobal }, "Guardar")),
+    ...PL.orden.map(evento),
+    Object.keys(tuyas).length ? h("p", {}, h("button", { class: "peligro", onclick: (e) => { if (confirm("¿Volver todos los avisos a la plantilla del equipo?")) act(e.target, async () => { await api("/api/plantillas/todo", { method: "DELETE" }); PL = null; }); } }, "Restaurar todo")) : null,
+  ];
+}
+
+// ---------- Qué aprende el algoritmo ----------
+let PR = null;
+const MODOS = { agendar: "Agendar solo", sugerir: "Solo sugerir", nunca: "Ignorar" };
+function vistaAlgoritmo() {
+  if (!PR) { api("/api/prediccion").then((r) => { PR = r; render(); }).catch((e) => toast(e.message, true)); return h("p", { class: "cargando" }, "Cargando…"); }
+  const c = PR.config;
+  const guardar = (btn, body) => act(btn, async () => { await api("/api/prediccion", { method: "PUT", body }); PR = null; }, "Guardado.");
+  const selModo = (itemId, actual) => h("select", { style: "width:auto", onchange: (e) => guardar(e.target, { modos: { [itemId]: e.target.value } }) },
+    Object.entries(MODOS).map(([k, l]) => h("option", { value: k, selected: k === actual }, l)));
+  const num = (id, label, val, min, max, step = 1) => h("div", {}, h("label", { for: id }, label), h("input", { id, type: "number", min, max, step, value: val }));
+  return [
+    h("p", {}, h("a", { href: "#ajustes" }, "‹ Ajustes")),
+    h("section", { class: "tarjeta" }, h("h1", {}, "Qué aprende"),
+      h("p", { class: "suave" }, "Miro lo que registras. Si haces lo mismo a una hora parecida varios días, lo considero un hábito: lo puedo agendar solo («Armar mi día»), solo sugerirlo en Hoy y en los avisos, o ignorarlo."),
+      h("ul", { class: "lista" }, PR.habitos.length ? PR.habitos.map((x) => h("li", {},
+        h("span", { class: "hora" }, x.hora),
+        h("span", { class: "que" }, x.title, h("small", {}, `${x.finde ? "fin de semana" : "lunes a viernes"} · ${x.dur_min} min · ${x.veces} de ${x.de} días`)),
+        selModo(x.item_id, x.modo))) : h("li", { class: "vacio" }, "Todavía no hay hábitos. Registra unos días."))),
+    h("section", { class: "tarjeta" }, h("h2", {}, "Tareas y rutinas"),
+      h("p", { class: "suave" }, "Las rutinas con hora se agendan solas salvo que digas otra cosa."),
+      h("ul", { class: "lista" }, PR.items.map((i) => h("li", {},
+        h("span", { class: "que" }, i.title, h("small", {}, [i.kind, i.hora, i.propio ? "" : "por defecto"].filter(Boolean).join(" · "))),
+        selModo(i.id, i.modo))))),
+    h("section", { class: "tarjeta" }, h("h2", {}, "Sensibilidad"),
+      h("div", { class: "col2" },
+        num("p-dias", "Días de historial", c.dias, 7, 120), num("p-veces", "Mínimo de días", c.min_veces, 2, 30),
+        num("p-frac", "Constancia mínima (%)", Math.round(c.min_frac * 100), 5, 100, 5), num("p-vent", "Tolerancia de hora (min)", c.ventana, 10, 120, 5),
+        num("p-radio", "Sugerir hasta (min de distancia)", c.radio, 10, 180, 5),
+        h("div", {}, h("label", { for: "p-def" }, "Hábito nuevo"), h("select", { id: "p-def" }, Object.entries(MODOS).map(([k, l]) => h("option", { value: k, selected: k === c.modo_defecto }, l))))),
+      h("p"), h("button", { class: "primario", onclick: (e) => guardar(e.target, {
+        dias: $("#p-dias").value, min_veces: $("#p-veces").value, min_frac: Number($("#p-frac").value) / 100,
+        ventana: $("#p-vent").value, radio: $("#p-radio").value, modo_defecto: $("#p-def").value,
+      }) }, "Guardar")),
   ];
 }
 

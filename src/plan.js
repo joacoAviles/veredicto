@@ -44,12 +44,12 @@ export function habits(sessions, now, tz, { dias = 28, minVeces = 3, minFrac = 0
 }
 
 // Lo que sueles hacer cerca de esta hora (para el botón rápido y los avisos).
-export function sugerencias(hab, rutinas, now, tz, n = 3) {
+export function sugerencias(hab, rutinas, now, tz, n = 3, radio = 60) {
   const m = minuteOfDay(now, tz), finde = isWeekend(weekday(now, tz));
   const cerca = hab
     .filter((h) => h.finde === finde)
     .map((h) => ({ ...h, dist: Math.min(Math.abs(h.minuto - m), 1440 - Math.abs(h.minuto - m)) }))
-    .filter((h) => h.dist <= 60)
+    .filter((h) => h.dist <= radio)
     .sort((a, b) => a.dist - b.dist || b.veces - a.veces);
   const out = [];
   for (const h of cerca) if (!out.some((o) => o.item_id === h.item_id)) out.push({ item_id: h.item_id, title: h.title, motivo: `${h.veces} de ${h.de} días` });
@@ -58,7 +58,7 @@ export function sugerencias(hab, rutinas, now, tz, n = 3) {
     if (out.length >= n) break;
     if (!r.hora || out.some((o) => o.item_id === r.id)) continue;
     const rm = hhmmToMin(r.hora);
-    if (Math.abs(rm - m) <= 60 && (!r.dias || r.dias.includes(weekday(now, tz)))) out.push({ item_id: r.id, title: r.title, motivo: `rutina ${String(r.hora).slice(0, 5)}` });
+    if (Math.abs(rm - m) <= radio && (!r.dias || r.dias.includes(weekday(now, tz)))) out.push({ item_id: r.id, title: r.title, motivo: `rutina ${String(r.hora).slice(0, 5)}` });
   }
   return out.slice(0, n);
 }
