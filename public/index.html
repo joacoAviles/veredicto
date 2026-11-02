@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>{{NOMBRE}}</title>
+  <meta name="theme-color" content="#111111">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="{{NOMBRE}}">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icono.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icono-180.png">
+  <link rel="stylesheet" href="/base.css">
+  <link rel="stylesheet" href="/theme.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="barra">
+    <a class="marca" href="#hoy"><span class="marca-logo" aria-hidden="true"></span><span class="marca-nombre">{{NOMBRE}}</span></a>
+    <span id="conexion" class="punto" title="Conectado"></span>
+  </header>
+  <main id="vista" aria-live="polite"><p class="cargando">Cargando…</p></main>
+  <nav class="pestanas" id="nav" hidden>
+    <a href="#hoy" data-v="hoy">Hoy</a>
+    <a href="#tareas" data-v="tareas">Tareas</a>
+    <a href="#bandeja" data-v="bandeja">Bandeja</a>
+    <a href="#registro" data-v="registro">Registro</a>
+    <a href="#ajustes" data-v="ajustes">Ajustes</a>
+  </nav>
+  <div id="aviso" class="toast" role="status" hidden></div>
+</body>
+</html>

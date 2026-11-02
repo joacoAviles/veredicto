@@ -1,0 +1,7 @@
+/* Ejemplo de otro tema: oscuro, contraste alto. Úsalo con TEMA=noche. */
+:root {
+  --fondo: #0b0b0c; --superficie: #151517; --texto: #f2f2f2; --suave: #8f8f95; --linea: #26262a;
+  --acento: #ff6a3d; --acento-texto: #0b0b0c; --peligro: #ff4d4d; --ok: #3ccf7a;
+  --fuente: ui-rounded, system-ui, sans-serif; --radio: 18px;
+  --logo: url(/icono.svg); --logo-display: block;
+}

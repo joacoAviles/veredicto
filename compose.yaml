@@ -1,0 +1,43 @@
+# Juez del Tiempo: app + base de datos. El túnel de Cloudflare es opcional (perfil "tunel").
+services:
+  app:
+    build: .
+    image: juez-del-tiempo:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://juez:${DB_PASSWORD:?pon DB_PASSWORD en .env}@db:5432/juez
+    ports:
+      - "127.0.0.1:${PUERTO:-8080}:8080"
+    volumes:
+      - ./tema:/tema:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: juez
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: juez
+    volumes:
+      - datos:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U juez -d juez"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  tunel:
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunel"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?pon TUNNEL_TOKEN en .env}
+    depends_on: [app]
+
+volumes:
+  datos:
