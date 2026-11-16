@@ -100,3 +100,11 @@ button.icono.peligro { color: var(--peligro); }
 .cuenta .lista li select { max-width: 55%; flex: 0 1 auto; font-size: .9rem; padding: .45em .5em; }
 
 .etapa { font-size: .8rem; color: var(--suave); margin: .9rem 0 .2rem; letter-spacing: .04em; }
+
+/* Teléfono: la hora va arriba del título para que el texto respire; los formularios en una columna. */
+@media (max-width: 520px) {
+  .lista li:has(> .hora) { flex-wrap: wrap; row-gap: .1rem; }
+  .lista li > .hora { flex-basis: 100%; width: auto; font-size: .8rem; }
+  .col2 { grid-template-columns: 1fr; }
+  .col2 .col2 { grid-template-columns: 1fr 1fr; }
+}

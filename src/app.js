@@ -11,7 +11,7 @@ import { buildState, currentSession, agendaRange } from "./estado.js";
 import { bus, changed, armarHoy } from "./servicios.js";
 import { refreshCalendars, buildICS } from "./conectores/ical.js";
 import { cifrar } from "./cifrado.js";
-import { sincronizar, CALENDARIO, cuentaConfig } from "./sync/motor.js";
+import { sincronizar, empujar, CALENDARIO, cuentaConfig } from "./sync/motor.js";
 import { authUrl, exchange, redirectUri } from "./sync/oauth.js";
 import * as caldavA from "./sync/caldav.js";
 import * as markdownA from "./sync/markdown.js";
@@ -37,10 +37,11 @@ export function createApp(pool, opts = {}) {
     fetcher: opts.fetcher || fetch,
     send: opts.send || enviar,
     notionClient: opts.notionClient || null,
+    empujarMs: opts.empujarMs ?? 1000,
   };
   const app = express();
   app.disable("x-powered-by");
-  app.set("trust proxy", true);
+  app.set("trust proxy", "loopback, linklocal, uniquelocal"); // el túnel o tu proxy en la red de Docker
   app.use((req, res, next) => {
     res.setHeader("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -57,11 +58,24 @@ export function createApp(pool, opts = {}) {
   const need = wrap(async (req, res, next) => {
     const who = await auth.identify(pool, req);
     if (!who) return res.status(401).json({ error: "Inicia sesión." });
+    // Un token de atajo solo sirve para los atajos: si se filtra, no abre tus cuentas ni tus ajustes.
+    if (who.via === "token" && !req.path.startsWith("/api/atajo/")) return res.status(403).json({ error: "Este token solo sirve para atajos." });
     req.who = who;
     next();
   });
+  // Ids mal formados: 404 en vez de un error de base de datos.
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  app.param("id", (req, res, next, id) => (UUID.test(id) || /^\d+$/.test(id) ? next() : res.status(404).json({ error: "No existe." })));
+
+  // Intentos de entrada: 8 fallidos por IP en 15 minutos y se bloquea un rato.
+  const fallos = new Map();
+  const bloqueado = (ip) => { const f = fallos.get(ip); return f && f.n >= 8 && Date.now() - f.t < 15 * 60_000; };
+  const fallo = (ip) => { const f = fallos.get(ip); fallos.set(ip, f && Date.now() - f.t < 15 * 60_000 ? { n: f.n + 1, t: f.t } : { n: 1, t: Date.now() }); };
   const st = () => buildState(pool, { tz: cfg.tz });
-  const done = async (res, extra = {}) => { changed(); res.json({ ok: true, ...extra, estado: await st() }); };
+  // Tras cada cambio, la cola sale a tus cuentas en ~1 s (sin esperar la pasada de 2 minutos).
+  let empujando = null;
+  const empujarPronto = () => { clearTimeout(empujando); empujando = setTimeout(() => empujar(pool, { tz: cfg.tz, fetcher: cfg.fetcher, notionClient: cfg.notionClient }).then((r) => { if (r.ok || r.err) changed("sync"); }, () => {}), cfg.empujarMs); empujando.unref?.(); };
+  const done = async (res, extra = {}) => { changed(); empujarPronto(); res.json({ ok: true, ...extra, estado: await st() }); };
 
   // ---------- Plantilla visual ----------
   app.get("/theme.css", wrap(async (req, res) => {
@@ -98,15 +112,19 @@ export function createApp(pool, opts = {}) {
     res.json({ cuenta, dentro: !!who, nombre: cfg.nombre, tz: cfg.tz, onboarding: (await getSetting(pool, "onboarding")) || null });
   }));
   app.post("/api/instalar", wrap(async (req, res) => {
-    await auth.createAccount(pool, { password: req.body.password, codigo: req.body.codigo });
+    if (bloqueado(req.ip)) return res.status(429).json({ error: "Demasiados intentos. Espera 15 minutos." });
+    try { await auth.createAccount(pool, { password: req.body.password, codigo: req.body.codigo }); }
+    catch (e) { if (e.status === 403) fallo(req.ip); throw e; }
     const token = await auth.login(pool, req.body.password, req.get("user-agent"));
     auth.setCookie(res, token, cfg.secureCookie);
     res.json({ ok: true });
   }));
   app.post("/api/entrar", wrap(async (req, res) => {
+    if (bloqueado(req.ip)) return res.status(429).json({ error: "Demasiados intentos. Espera 15 minutos." });
     await new Promise((r) => setTimeout(r, 300));
     const token = await auth.login(pool, req.body.password, req.get("user-agent"));
-    if (!token) return res.status(401).json({ error: "Contraseña incorrecta." });
+    if (!token) { fallo(req.ip); return res.status(401).json({ error: "Contraseña incorrecta." }); }
+    fallos.delete(req.ip);
     auth.setCookie(res, token, cfg.secureCookie);
     res.json({ ok: true });
   }));
@@ -147,7 +165,10 @@ export function createApp(pool, opts = {}) {
     await done(res);
   }));
   app.delete("/api/sesiones/:id", need, wrap(async (req, res) => {
-    await pool.query("DELETE FROM sessions WHERE id=$1 AND state='done'", [req.params.id]);
+    await tx(pool, async (q) => {
+      const r = await q.query("DELETE FROM sessions WHERE id=$1 AND state='done' RETURNING cal_ref", [req.params.id]);
+      if (r.rows[0]?.cal_ref?.href) await core.enqueue(q, "sesion_cal", null, { borrar: r.rows[0].cal_ref });
+    });
     await done(res);
   }));
 
@@ -187,7 +208,7 @@ export function createApp(pool, opts = {}) {
     if (!(await auth.identify(pool, req))) return res.redirect(303, "/");
     const text = [req.body.title, req.body.text, req.body.url].filter(Boolean).join("\n");
     if (text.trim()) { await tx(pool, (q) => core.capture(q, { text, source: "compartir" })); changed(); }
-    res.redirect(303, "/#bandeja");
+    res.redirect(303, "/#gestiones");
   }));
 
   // ---------- Agenda ----------
@@ -250,7 +271,7 @@ export function createApp(pool, opts = {}) {
     const s = await getSetting(pool, "feed_secreto");
     if (!s || req.params.s !== s) return res.status(404).end();
     const from = new Date(Date.now() - 30 * 86_400_000), to = new Date(Date.now() + 14 * 86_400_000);
-    const blocks = (await pool.query("SELECT id,title,starts_at,ends_at FROM blocks WHERE starts_at BETWEEN $1 AND $2", [from, to])).rows;
+    const blocks = (await pool.query("SELECT id,title,starts_at,ends_at FROM blocks WHERE borrado IS NULL AND starts_at BETWEEN $1 AND $2", [from, to])).rows;
     const sessions = (await pool.query("SELECT id,title,started_at,ended_at FROM sessions WHERE state='done' AND started_at BETWEEN $1 AND $2", [from, to])).rows;
     res.type("text/calendar").send(buildICS({
       name: cfg.nombre,
@@ -554,7 +575,9 @@ export function createApp(pool, opts = {}) {
   app.get("/api/prediccion", need, wrap(async (req, res) => {
     const pred = await getPrediccion(pool);
     const hab = await habitosConModo(pool, Date.now(), cfg.tz, pred);
-    const items = (await pool.query("SELECT id, kind, title, hora, dias, est_min FROM items WHERE status NOT IN ('archivada') ORDER BY kind DESC, title")).rows;
+    // Solo lo que el algoritmo puede agendar: rutinas y lo que ya detectó como hábito.
+    const ids = hab.map((h) => h.item_id).filter(Boolean);
+    const items = (await pool.query("SELECT id, kind, title, hora, dias, est_min FROM items WHERE status <> 'archivada' AND (kind='rutina' OR id = ANY($1::uuid[])) ORDER BY kind DESC, title", [ids])).rows;
     res.json({
       config: pred,
       habitos: hab.map((h) => ({ ...h, hora: `${String(Math.floor(h.minuto / 60)).padStart(2, "0")}:${String(h.minuto % 60).padStart(2, "0")}` })),
@@ -682,7 +705,8 @@ export function createApp(pool, opts = {}) {
   app.get("/salud", wrap(async (req, res) => { await pool.query("SELECT 1"); res.json({ ok: true }); }));
 
   app.use((err, req, res, next) => {
-    const status = err.status || (err.type === "entity.parse.failed" ? 400 : 500);
+    const status = err.status || (err.type === "entity.parse.failed" || err.code === "22P02" || err.code === "22007" || err.code === "22008" ? 400 : 500);
+    if (status === 400 && err.code) err.message = "Dato no válido.";
     if (status >= 500) console.error(err);
     res.status(status).json({ error: status >= 500 ? "Algo falló en el servidor." : err.message });
   });
@@ -693,6 +717,6 @@ const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", 
 const LABEL = { iniciar: "Iniciar", seguir: "Seguir", parar: "Parar", silenciar: "Silenciar" };
 function actionPage(nombre, msg, token, d) {
   const what = d ? `${LABEL[d.a] || d.a}${d.p?.title ? " · " + d.p.title : ""}${d.p?.min ? ` ${d.p.min} min` : ""}` : "";
-  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(nombre)}</title><link rel="stylesheet" href="/theme.css"><link rel="stylesheet" href="/base.css"></head>
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(nombre)}</title><link rel="stylesheet" href="/base.css"><link rel="stylesheet" href="/theme.css"></head>
 <body class="accion"><main class="tarjeta">${msg ? `<h1>${escapeHtml(msg)}</h1>` : `<form method="post" action="/a/${escapeHtml(token)}"><button class="grande primario">${escapeHtml(what)}</button></form>`}<p><a href="/">Abrir ${escapeHtml(nombre)}</a></p></main></body></html>`;
 }

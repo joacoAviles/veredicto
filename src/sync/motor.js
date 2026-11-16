@@ -283,6 +283,13 @@ async function despacharUno(pool, job, o) {
     const { cfg, opts } = await conCfg({ id: e.cuenta, config: e.config });
     const r = await A.patch(cfg, e.href, e.etag, { title: e.title, start: +e.starts_at, end: +e.ends_at }, opts);
     await pool.query("UPDATE calendar_events SET etag=$3, local_editado=NULL WHERE calendar_id=$1 AND uid=$2", [e.calendar_id, e.uid, r.etag]);
+  } else if (job.kind === "sesion_cal" && job.datos?.borrar) {
+    // Borraste un registro en la app: sale también de «Veredicto · Registrado».
+    const ref = job.datos.borrar;
+    const cal = (await pool.query("SELECT c.*, k.tipo, k.config, k.id AS cuenta FROM calendars c JOIN cuentas k ON k.id=c.cuenta_id WHERE c.id=$1", [ref.calendar_id])).rows[0];
+    if (!cal) return;
+    const { cfg, opts } = await conCfg({ id: cal.cuenta, config: cal.config });
+    await CALENDARIO[cal.tipo].remove(cfg, ref.href, ref.etag, opts);
   } else if (job.kind === "sesion_cal") {
     const s = (await pool.query("SELECT * FROM sessions WHERE id=$1 AND state='done'", [job.ref])).rows[0];
     if (!s) return;
@@ -354,10 +361,17 @@ export async function despachar(pool, o = {}, { limit = 50 } = {}) {
 }
 
 // ---------- Una pasada completa ----------
+// Todo pasa en serie: nunca dos despachos a la vez sobre la misma cola.
+let cola = Promise.resolve();
+const enSerie = (fn) => { const p = cola.then(fn, fn); cola = p.catch(() => {}); return p; };
+
+// Solo empujar la cola (rápido, tras cada cambio en la app).
+export const empujar = (pool, o = {}) => enSerie(() => despachar(pool, o));
+
 let enCurso = null;
 export function sincronizar(pool, o = {}) {
   if (enCurso) return enCurso;
-  enCurso = (async () => {
+  enCurso = enSerie(async () => {
     const now = o.now || Date.now();
     const res = { cuentas: [], cola: null };
     const cuentas = (await pool.query("SELECT * FROM cuentas WHERE activa ORDER BY creada")).rows.filter((c) => !o.cuentaId || c.id === o.cuentaId);
@@ -377,6 +391,6 @@ export function sincronizar(pool, o = {}) {
     await pool.query("DELETE FROM blocks WHERE borrado < now() - interval '30 days'");
     await pool.query("DELETE FROM outbox WHERE status='ok' AND done_at < now() - interval '14 days'");
     return res;
-  })().finally(() => { enCurso = null; });
+  }).finally(() => { enCurso = null; });
   return enCurso;
 }

@@ -46,7 +46,7 @@ export async function buildState(q, { tz, now = Date.now() }) {
   const day = startOfDay(now, tz), tomorrow = addDays(day, 1, tz);
   const pred = await getPrediccion(q);
   const [items, current, agenda, done, captures, outbox, cals, cuentas, avisos, hab, conflictos] = await Promise.all([
-    q.query("SELECT * FROM items WHERE status <> 'archivada' ORDER BY kind, (status='hecha'), (status='en curso') DESC, due_date NULLS LAST, created_at DESC LIMIT 500"),
+    q.query("SELECT * FROM items WHERE status <> 'archivada' AND NOT (status='hecha' AND updated_at < now() - interval '30 days') ORDER BY kind, (status='hecha'), (status='en curso') DESC, due_date NULLS LAST, created_at DESC LIMIT 500"),
     currentSession(q),
     agendaRange(q, day, tomorrow),
     q.query(

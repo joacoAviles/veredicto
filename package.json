@@ -1,6 +1,6 @@
 {
   "name": "veredicto",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Veredicto: el juez de tu tiempo, en tu servidor. Calendarios y notas en ambos sentidos, registro de tiempo y un vigilante que reclama.",
   "license": "MIT",
   "type": "module",

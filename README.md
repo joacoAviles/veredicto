@@ -66,6 +66,8 @@ Para que funcionen los botones de los avisos y la conexión con Google u Outlook
 | Notas Markdown | `datos/notas/` o la carpeta que montes |
 | Respaldos diarios (03:00, se guardan 14) | `datos/respaldos/` |
 
+Los tokens de atajos solo sirven para las direcciones `/api/atajo/…`: si uno se filtra, no abre tus cuentas ni tus ajustes. La entrada se bloquea 15 minutos tras 8 contraseñas incorrectas.
+
 No hay servidor central ni telemetría. Veredicto solo habla con tus propias cuentas y con el canal de avisos que elijas.
 
 ## Actualizar, respaldar, mover
@@ -82,6 +84,7 @@ Para fijar una versión, pon `VEREDICTO_VERSION=v2.0.0` en `.env`. Para mover Ve
 ## Cómo sincroniza
 
 - Cada cuenta externa sigue siendo dueña de lo suyo. Veredicto guarda un espejo y una cola de cambios con reintentos.
+- Lo que cambias en la app sale a tus cuentas en un segundo; lo que cambias afuera llega en la siguiente pasada (cada 2 minutos, o al tocar «Sincronizar ahora»).
 - Trae solo una ventana de 14 días hacia atrás y 60 hacia adelante.
 - Si el mismo evento cambia en los dos lados entre dos pasadas, gana el más reciente. El otro queda en «Revisar conflictos», donde puedes deshacerlo.
 - Si borras algo afuera, en Veredicto pasa a una papelera 30 días. Los eventos repetidos se ven, pero se editan en su calendario de origen.

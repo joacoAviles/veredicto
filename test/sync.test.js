@@ -86,7 +86,7 @@ before(async () => {
   await pool.query("DROP SCHEMA public CASCADE; CREATE SCHEMA public;");
   await migrate(pool);
   notas = await mkdtemp(path.join(tmpdir(), "veredicto-notas-"));
-  const app = createApp(pool, { tz: TZ, publicUrl: "https://v.ejemplo.cl", notasDir: notas, notionClient: fakeNotion, send: async () => [] });
+  const app = createApp(pool, { tz: TZ, publicUrl: "https://v.ejemplo.cl", notasDir: notas, notionClient: fakeNotion, send: async () => [], empujarMs: 600_000 });
   server = app.listen(0);
   base = `http://127.0.0.1:${server.address().port}`;
   const { presetAccount } = await import("../src/auth.js");
@@ -333,4 +333,29 @@ test("Notion Flujo: de idea a bloque en el calendario y tiempo de vuelta", { ski
   const nueva = notionDb.flujo.find((x) => x.nombre === "Idea: video sobre el carburador");
   assert.ok(nueva);
   assert.equal(nueva.estado, "Bandeja");
+});
+
+test("tras un cambio en la app, la cola sale sola en segundos", { skip: !URL || !RAD }, async () => {
+  const usuario = "rapido" + Date.now();
+  const app2 = createApp(pool, { tz: TZ, publicUrl: "https://v.ejemplo.cl", notasDir: notas, notionClient: fakeNotion, send: async () => [], empujarMs: 200 });
+  const s2 = app2.listen(0);
+  const b2 = `http://127.0.0.1:${s2.address().port}`;
+  const h = { cookie, "content-type": "application/json" };
+  await pool.query("UPDATE calendars SET rol='leer' WHERE rol='plan'");
+  let r = await fetch(b2 + "/api/cuentas/caldav", { method: "POST", headers: h, body: JSON.stringify({ nombre: "R2", url: RAD, usuario, clave: "x" }) });
+  const cuenta = (await r.json()).cuenta;
+  await fetch(b2 + `/api/cuentas/${cuenta}/crear-calendario`, { method: "POST", headers: h, body: JSON.stringify({ rol: "plan" }) });
+  const now = Date.now();
+  await fetch(b2 + "/api/bloques", { method: "POST", headers: h, body: JSON.stringify({ title: "Rápido", inicio: now + 3600e3, fin: now + 7200e3 }) });
+  await new Promise((ok) => setTimeout(ok, 2500));
+  const plan = (await pool.query("SELECT remote_id FROM calendars WHERE rol='plan'")).rows[0];
+  const remotos = await caldav.pull({ url: RAD, usuario, clave: "x" }, plan.remote_id, now - 864e5, now + 864e5, TZ);
+  assert.ok(remotos.some((x) => x.title === "Rápido"), "el bloque llegó al calendario sin esperar la pasada de 2 minutos");
+  // Un token de atajo no abre las cuentas.
+  const t = await (await fetch(b2 + "/api/tokens", { method: "POST", headers: h, body: JSON.stringify({ label: "x" }) })).json();
+  assert.equal((await fetch(b2 + "/api/cuentas", { headers: { authorization: `Bearer ${t.token}` } })).status, 403);
+  assert.equal((await fetch(b2 + "/api/atajo/estado", { headers: { authorization: `Bearer ${t.token}` } })).status, 200);
+  // Ids inválidos: 404, no error de servidor.
+  assert.equal((await fetch(b2 + "/api/bloques/no-es-un-id", { method: "DELETE", headers: h })).status, 404);
+  s2.close();
 });
