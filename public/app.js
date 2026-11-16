@@ -66,7 +66,8 @@ async function refrescar() {
     try {
       S = await api("/api/estado");
       // En Ajustes hay formularios a medio llenar: se actualizan los datos sin redibujar.
-      if (!location.hash.startsWith("#ajustes")) render();
+      if (location.hash.startsWith("#agenda")) semana = null;
+      if (location.hash.startsWith("#ajustes")) cuentasCfg = null; else render();
     } catch {}
   }, 120);
 }
@@ -99,7 +100,7 @@ async function inicio() {
     if (m[1] === "capturar") setTimeout(() => $("#captura")?.focus(), 200);
   }
 }
-window.addEventListener("hashchange", render);
+window.addEventListener("hashchange", () => { document.querySelectorAll("dialog.dialogo").forEach((d) => d.remove()); render(); });
 
 function render() {
   clearInterval(tick);
@@ -107,9 +108,10 @@ function render() {
   $("#nav").hidden = false;
   const [v0, sub] = location.hash.slice(1).split(/[?&]/)[0].split("/");
   const v = v0 || "hoy";
-  for (const a of document.querySelectorAll("#nav a")) a.classList.toggle("activa", a.dataset.v === v);
+  const tab = { tareas: "gestiones", bandeja: "gestiones" }[v] || v;
+  for (const a of document.querySelectorAll("#nav a")) a.classList.toggle("activa", a.dataset.v === tab);
   const foco = document.activeElement?.id, val = foco && document.activeElement.value;
-  const vistas = { hoy: vistaHoy, tareas: vistaTareas, bandeja: vistaBandeja, registro: vistaRegistro, ajustes: vistaAjustes };
+  const vistas = { hoy: vistaHoy, agenda: vistaAgenda, gestiones: vistaGestiones, tareas: vistaTareas, bandeja: vistaGestiones, registro: vistaRegistro, ajustes: vistaAjustes };
   const sub_ = { "ajustes/avisos": vistaPlantillas, "ajustes/algoritmo": vistaAlgoritmo }[`${v}/${sub}`];
   vista.replaceChildren(...[].concat((sub_ || vistas[v] || vistaHoy)()).filter(Boolean));
   // Mantiene lo que estabas escribiendo si llega una actualización en vivo.
@@ -181,12 +183,7 @@ function vistaHoy() {
     ...S.agenda.blocks.map((b) => ({ ...b, tipo: "bloque" })),
     ...S.agenda.events.map((e) => ({ ...e, tipo: "evento" })),
   ].sort((a, b) => (a.all_day ? -1 : 0) - (b.all_day ? -1 : 0) || a.start - b.start);
-  const agenda = ag.length ? h("ul", { class: "lista" }, ag.map((x) => h("li", { class: x.end <= now ? "pasado" : x.start <= now ? "ahora-mismo" : "" },
-    h("span", { class: "hora" }, x.all_day ? "todo el día" : `${hora(x.start)}–${hora(x.end)}`),
-    h("span", { class: "que" }, x.title, h("small", {}, x.tipo === "evento" ? x.calendario : x.origin === "auto" ? "armado solo" : "")),
-    x.end > now && !x.all_day ? h("button", { class: "icono", title: "Iniciar", "aria-label": "Iniciar " + x.title, onclick: (e) => iniciarPor(x.item_id ? { item_id: x.item_id } : { title: x.title }, e.target) }, "▶") : null,
-    x.tipo === "bloque" ? h("button", { class: "icono", title: "Quitar", "aria-label": "Quitar bloque", onclick: (e) => act(e.target, () => api(`/api/bloques/${x.id}`, { method: "DELETE" })) }, "✕") : null,
-  ))) : h("p", { class: "vacio" }, "Nada agendado. Toca «Armar mi día» y lo armo con lo que sueles hacer.");
+  const agenda = ag.length ? h("ul", { class: "lista" }, ag.map((x) => filaAgenda(x, now))) : h("p", { class: "vacio" }, "Nada agendado. Toca «Armar mi día» y lo armo con lo que sueles hacer.");
 
   const capt = h("input", { id: "captura", placeholder: "Idea, pendiente, lo que sea…", enterkeyhint: "done" });
   const guardar = (e) => { const t = capt.value.trim(); if (!t) return; capt.value = ""; act(e?.target, () => api("/api/capturas", { method: "POST", body: { text: t } }), "A la bandeja."); };
@@ -205,6 +202,82 @@ function vistaHoy() {
       h("h2", {}, `Medido hoy · ${fmtCorto(S.hoy.medido_ms + (S.current?.state === "running" ? 0 : 0))}`),
       resumenTramos(S.hoy.tramos)),
     h("section", { class: "tarjeta" }, h("h2", {}, "Captura rápida"), h("div", { class: "fila" }, h("div", { class: "crece" }, capt), h("button", { onclick: guardar }, "Guardar"))),
+  ];
+}
+
+// Una fila de agenda: bloque tuyo o evento de tus calendarios. ▶ inicia, ✎ mueve o renombra, ✕ borra.
+function filaAgenda(x, now, { conDia = false } = {}) {
+  const editable = x.tipo === "bloque" || x.editable;
+  const origen = x.tipo === "evento" ? x.calendario + (x.recurrente ? " · se repite" : "") + (x.pendiente ? " · enviando…" : "")
+    : [x.origin === "auto" ? "armado solo" : "", x.calendario ? (x.sincronizado ? x.calendario : "enviando…") : ""].filter(Boolean).join(" · ");
+  return h("li", { class: x.end <= now ? "pasado" : x.start <= now ? "ahora-mismo" : "" },
+    h("span", { class: "hora" }, conDia ? h("b", {}, diaCorto(x.start) + " ") : null, x.all_day ? "todo el día" : `${hora(x.start)}–${hora(x.end)}`),
+    h("span", { class: "que" }, x.color ? h("span", { class: "color", style: `background:${x.color}` }) : null, x.title, h("small", {}, origen)),
+    x.end > now && !x.all_day ? h("button", { class: "icono", title: "Iniciar", "aria-label": "Iniciar " + x.title, onclick: (e) => iniciarPor(x.item_id ? { item_id: x.item_id } : { title: x.title }, e.target) }, "▶") : null,
+    editable && !x.all_day ? h("button", { class: "icono", title: "Mover o renombrar", "aria-label": "Editar " + x.title, onclick: () => editarAgenda(x) }, "✎") : null,
+    x.tipo === "bloque" ? h("button", { class: "icono", title: "Quitar", "aria-label": "Quitar bloque", onclick: (e) => act(e.target, () => api(`/api/bloques/${x.id}`, { method: "DELETE" })) }, "✕") : null,
+  );
+}
+const diaCorto = (ms) => new Intl.DateTimeFormat("es-CL", { weekday: "short", day: "numeric", timeZone: sesion?.tz }).format(ms);
+const hhmmDe = (ms) => new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: sesion?.tz }).format(ms);
+const fechaDe = (ms) => new Intl.DateTimeFormat("en-CA", { timeZone: sesion?.tz }).format(ms);
+// Fecha AAAA-MM-DD + HH:MM en la zona del servidor → milisegundos.
+function enZona(fecha, hhmm) {
+  const guess = Date.parse(`${fecha}T${hhmm}:00Z`);
+  const off = Date.parse(new Date(guess).toLocaleString("en-US", { timeZone: sesion.tz }) + " UTC") - guess;
+  return guess - off;
+}
+
+function editarAgenda(x) {
+  const t = h("input", { id: "ed-t", value: x.title });
+  const f = h("input", { id: "ed-f", type: "date", value: fechaDe(x.start) });
+  const a = h("input", { id: "ed-a", type: "time", value: hhmmDe(x.start) });
+  const b = h("input", { id: "ed-b", type: "time", value: hhmmDe(x.end) });
+  const dlg = h("dialog", { class: "dialogo" },
+    h("h3", {}, x.tipo === "bloque" ? "Mover bloque" : `Mover en ${x.calendario}`),
+    h("label", { for: "ed-t" }, "Qué"), t, h("label", { for: "ed-f" }, "Día"), f,
+    h("div", { class: "col2" }, h("div", {}, h("label", { for: "ed-a" }, "Desde"), a), h("div", {}, h("label", { for: "ed-b" }, "Hasta"), b)),
+    h("p", { class: "suave" }, x.tipo === "bloque" ? "El cambio llega a tu calendario «Plan» en segundos." : "El cambio se escribe en el calendario de origen; invitados y alarmas se conservan."),
+    h("div", { class: "fila" },
+      h("button", { class: "primario", onclick: (e) => {
+        const inicio = enZona(f.value, a.value);
+        let fin = enZona(f.value, b.value);
+        if (fin <= inicio) fin += 86_400_000;
+        act(e.target, async () => {
+          if (x.tipo === "bloque") await api(`/api/bloques/${x.id}`, { method: "PATCH", body: { title: t.value, inicio, fin } });
+          else await api("/api/eventos", { method: "PATCH", body: { calendar_id: x.calendar_id, uid: x.uid, title: t.value, inicio, fin } });
+          semana = null; dlg.close(); dlg.remove();
+        }, "Guardado.");
+      } }, "Guardar"),
+      h("button", { onclick: () => { dlg.close(); dlg.remove(); } }, "Cancelar")));
+  document.body.append(dlg);
+  dlg.showModal();
+}
+
+// ---------- Agenda de la semana ----------
+let semana = null, semanaDesde = null;
+function vistaAgenda() {
+  if (!semana) {
+    api(`/api/agenda?dias=7${semanaDesde ? `&desde=${semanaDesde}` : ""}`).then((r) => { semana = r; render(); }).catch((e) => toast(e.message, true));
+    return h("p", { class: "cargando" }, "Cargando…");
+  }
+  const now = Date.now();
+  const todo = [...semana.blocks.map((b) => ({ ...b, tipo: "bloque" })), ...semana.events.map((e) => ({ ...e, tipo: "evento" }))].sort((a, b) => a.start - b.start);
+  const porDia = new Map();
+  for (const x of todo) { const k = fechaDe(Math.max(x.start, semanaDesde || 0)); if (!porDia.has(k)) porDia.set(k, []); porDia.get(k).push(x); }
+  const mover = (d) => { const base = semanaDesde || enZona(fechaDe(now), "00:00"); semanaDesde = base + d * 7 * 86_400_000; semana = null; render(); };
+  return [
+    h("section", { class: "tarjeta" }, h("div", { class: "fila" },
+      h("button", { class: "icono", "aria-label": "Semana anterior", onclick: () => mover(-1) }, "‹"),
+      h("h2", { class: "crece", style: "text-align:center;margin:0" }, semanaDesde ? `Semana del ${fecha(semanaDesde)}` : "Próximos 7 días"),
+      h("button", { class: "icono", "aria-label": "Semana siguiente", onclick: () => mover(1) }, "›")),
+      h("div", { class: "fila", style: "margin-top:.5rem" },
+        h("button", { onclick: (e) => act(e.target, async () => { await api("/api/sincronizar", { method: "POST" }); semana = null; }, "Sincronizado.") }, "Sincronizar ahora"),
+        semanaDesde ? h("button", { onclick: () => { semanaDesde = null; semana = null; render(); } }, "Hoy") : null)),
+    ...[...porDia].map(([dia, xs]) => h("section", { class: "tarjeta" },
+      h("h2", {}, fecha(enZona(dia, "12:00"))),
+      h("ul", { class: "lista" }, xs.map((x) => filaAgenda(x, now))))),
+    porDia.size ? null : h("p", { class: "vacio" }, "Nada esta semana. Conecta tus calendarios en Ajustes."),
   ];
 }
 
@@ -253,7 +326,7 @@ function resumenTramos(tramos) {
 
 // ---------- Tareas y rutinas ----------
 function vistaTareas() {
-  const tareas = S.items.filter((i) => i.kind === "tarea");
+  const tareas = S.items.filter((i) => i.kind === "tarea" && i.fuente === "app");
   const rutinas = S.items.filter((i) => i.kind === "rutina");
   const fila = (i) => h("li", { class: i.status === "hecha" ? "hecha" : "" },
     h("button", { class: "icono", title: "Iniciar", "aria-label": "Iniciar " + i.title, onclick: (e) => iniciarPor({ item_id: i.id }, e.target) }, "▶"),
@@ -292,22 +365,34 @@ function vistaTareas() {
   ];
 }
 
-// ---------- Bandeja ----------
-function vistaBandeja() {
-  const txt = h("textarea", { id: "nota", placeholder: "Escribe una idea o una nota. La primera línea es el título." });
-  const tipo = h("select", { id: "nota-tipo" }, h("option", { value: "captura" }, "Captura (para procesar)"), h("option", { value: "nota" }, "Nota (para guardar)"));
+// ---------- Gestiones: casillas de tus notas + capturas ----------
+function vistaGestiones() {
+  const txt = h("textarea", { id: "nota", placeholder: "Una idea o un pendiente. La primera línea es el título." });
+  const tipo = h("select", { id: "nota-tipo" }, h("option", { value: "captura" }, "Pendiente (casilla)"), h("option", { value: "nota" }, "Nota (sin casilla)"));
+  const gest = S.items.filter((i) => i.kind === "tarea" && i.fuente !== "app" && i.status !== "hecha");
+  const hechas = S.items.filter((i) => i.kind === "tarea" && i.fuente !== "app" && i.status === "hecha").slice(0, 20);
+  const porNota = new Map();
+  for (const g of gest) { const k = g.nota || "Sin nota"; if (!porNota.has(k)) porNota.set(k, []); porNota.get(k).push(g); }
   const abiertas = S.captures.filter((c) => c.status === "abierta");
-  const notas = S.captures.filter((c) => c.kind === "nota" && c.status !== "abierta");
-  const fila = (c) => h("li", {},
-    h("span", { class: "que" }, c.text, h("small", {}, [c.kind, c.source, new Date(c.at).toLocaleDateString("es-CL"), c.en_notion ? "en Notion" : ""].filter(Boolean).join(" · ")), c.body ? h("small", {}, c.body.slice(0, 160)) : null),
-    c.status === "abierta" ? h("button", { class: "icono", title: "Convertir en tarea", onclick: (e) => act(e.target, () => api(`/api/capturas/${c.id}/tarea`, { method: "POST" }), "Ahora es tarea.") }, "→") : null,
-    c.status === "abierta" ? h("button", { class: "icono", title: "Procesada", onclick: (e) => act(e.target, () => api(`/api/capturas/${c.id}`, { method: "PATCH", body: { status: "procesada" } })) }, "✓") : null);
+  const destino = S.conexiones.cuentas.some((c) => c.tipo === "markdown" || c.tipo === "notion");
+  const fila = (i) => h("li", { class: i.status === "hecha" ? "hecha" : "" },
+    h("button", { class: "icono", title: i.status === "hecha" ? "Reabrir" : "Hecha", "aria-label": "Marcar " + i.title, onclick: (e) => act(e.target, () => api(`/api/items/${i.id}`, { method: "PATCH", body: { status: i.status === "hecha" ? "pendiente" : "hecha" } })) }, i.status === "hecha" ? "☑" : "☐"),
+    h("span", { class: "que" }, i.title, h("small", {}, [i.due_date ? `vence ${i.due_date}` : "", i.status === "en curso" ? "en curso" : "", i.fuente === "notion" ? "Notion" : "Markdown"].filter(Boolean).join(" · "))),
+    i.status !== "hecha" ? h("button", { class: "icono", title: "Iniciar", "aria-label": "Iniciar " + i.title, onclick: (e) => iniciarPor({ item_id: i.id }, e.target) }, "▶") : null);
+  const filaCap = (c) => h("li", {},
+    h("span", { class: "que" }, c.text, h("small", {}, [c.source, new Date(c.at).toLocaleDateString("es-CL")].join(" · ")), c.body ? h("small", {}, c.body.slice(0, 160)) : null),
+    h("button", { class: "icono", title: "Convertir en tarea", onclick: (e) => act(e.target, () => api(`/api/capturas/${c.id}/tarea`, { method: "POST" }), "Ahora es tarea.") }, "→"),
+    h("button", { class: "icono", title: "Procesada", onclick: (e) => act(e.target, () => api(`/api/capturas/${c.id}`, { method: "PATCH", body: { status: "procesada" } })) }, "✓"));
   return [
-    h("section", { class: "tarjeta" }, h("label", { for: "nota" }, "Nueva"), txt, h("div", { class: "fila", style: "margin-top:.5rem" },
+    h("p", { class: "suave", style: "text-align:right;margin:0 0 .5rem" }, h("a", { href: "#tareas" }, "Tareas y rutinas de la app ›")),
+    h("section", { class: "tarjeta" }, h("label", { for: "nota" }, destino ? "A la bandeja de tus notas" : "A la bandeja"), txt, h("div", { class: "fila", style: "margin-top:.5rem" },
       h("div", { class: "crece" }, tipo),
-      h("button", { class: "primario", onclick: (e) => { const t = txt.value.trim(); if (!t) return; act(e.target, async () => { await api("/api/capturas", { method: "POST", body: { text: t, kind: tipo.value } }); txt.value = ""; }, "Guardado."); } }, "Guardar"))),
-    h("section", { class: "tarjeta" }, h("h2", {}, `Por procesar (${abiertas.length})`), abiertas.length ? h("ul", { class: "lista" }, abiertas.map(fila)) : h("p", { class: "vacio" }, "Bandeja vacía.")),
-    notas.length ? h("section", { class: "tarjeta" }, h("h2", {}, "Notas"), h("ul", { class: "lista" }, notas.map(fila))) : null,
+      h("button", { class: "primario", onclick: (e) => { const t = txt.value.trim(); if (!t) return; act(e.target, async () => { await api("/api/capturas", { method: "POST", body: { text: t, kind: tipo.value } }); txt.value = ""; }, "Guardado."); } }, "Guardar")),
+      destino ? null : h("p", { class: "suave" }, "Conecta tus notas (Ajustes → paso 3) y esto se escribe en tu Obsidian o Notion.")),
+    ...[...porNota].map(([nota, xs]) => h("section", { class: "tarjeta" }, h("h2", {}, `${nota} · ${xs.length}`), h("ul", { class: "lista" }, xs.map(fila)))),
+    gest.length || !destino ? null : h("p", { class: "vacio" }, "Sin casillas abiertas en tus notas."),
+    abiertas.length ? h("section", { class: "tarjeta" }, h("h2", {}, destino ? `Enviando a tus notas (${abiertas.length})` : `Bandeja (${abiertas.length})`), h("ul", { class: "lista" }, abiertas.map(filaCap))) : null,
+    hechas.length ? h("section", { class: "tarjeta" }, h("details", {}, h("summary", {}, `Hechas recientes (${hechas.length})`), h("ul", { class: "lista" }, hechas.map(fila)))) : null,
   ];
 }
 
@@ -341,21 +426,31 @@ function vistaRegistro() {
 }
 
 // ---------- Ajustes y asistente ----------
-let avisosCfg = null, tokenNuevo = null, feedUrl = null;
+let avisosCfg = null, tokenNuevo = null, feedUrl = null, cuentasCfg = null, conectando = null, conflictosLista = null;
 function vistaAjustes() {
   if (!avisosCfg) { api("/api/avisos").then((r) => { avisosCfg = r; render(); }).catch((e) => toast(e.message, true)); return h("p", { class: "cargando" }, "Cargando…"); }
   const cx = S.conexiones;
-  const listo = { avisos: cx.avisos.ntfy || cx.avisos.telegram || cx.avisos.webhook, cal: cx.calendarios.length > 0, notion: cx.notion.ok, atajos: !!tokenNuevo || avisosCfg.tokens > 0 };
+  if (!cuentasCfg) { api("/api/cuentas").then((r) => { cuentasCfg = r; render(); }).catch((e) => toast(e.message, true)); return h("p", { class: "cargando" }, "Cargando…"); }
+  const avisoUrl = new URLSearchParams(location.hash.split("?")[1] || "").get("aviso");
+  if (avisoUrl) { setTimeout(() => toast(avisoUrl, /No se pudo|venció|dijo/.test(avisoUrl)), 50); history.replaceState(null, "", "#ajustes"); }
+  const cuentas = cuentasCfg.cuentas;
+  const listo = {
+    avisos: cx.avisos.ntfy || cx.avisos.telegram || cx.avisos.webhook,
+    cal: cuentas.some((c) => ["caldav", "google", "outlook"].includes(c.tipo) && c.activa) || cuentasCfg.ical.length > 0,
+    notas: cuentas.some((c) => c.tipo === "markdown" || c.tipo === "notion"),
+    atajos: !!tokenNuevo || avisosCfg.tokens > 0,
+  };
   const paso = (n, ok, titulo, ...cuerpo) => h("section", { class: "tarjeta" }, h("div", { class: "paso" + (ok ? " listo" : "") }, h("span", { class: "num" }, ok ? "✓" : n), h("div", {}, h("h3", {}, titulo), ...cuerpo)));
 
   return [
     !sesion.onboarding?.listo ? h("section", { class: "tarjeta" }, h("h1", {}, "Configura en 4 pasos"),
-      h("p", { class: "suave" }, "Todo queda en tu servidor. Puedes saltarte pasos y volver cuando quieras."),
+      h("p", { class: "suave" }, "Todo queda en tu servidor: las claves se guardan cifradas y nada pasa por terceros. Puedes saltarte pasos y volver cuando quieras."),
       h("button", { class: "primario", onclick: (e) => act(e.target, async () => { await api("/api/onboarding", { method: "PUT", body: { listo: true } }); sesion.onboarding = { listo: true }; location.hash = "#hoy"; }) }, "Listo, ir a Hoy")) : null,
     paso(1, listo.avisos, "Avisos al celular", pasoAvisos()),
-    paso(2, listo.cal, "Calendarios (Google, iCloud, Outlook)", pasoCalendarios()),
-    paso(3, listo.notion, "Notion", pasoNotion()),
+    paso(2, listo.cal, "Calendarios: Google, iCloud, Outlook", pasoCalendarios()),
+    paso(3, listo.notas, "Notas: Obsidian o Notion", pasoNotas()),
     paso(4, listo.atajos, "Atajos: Siri, Android y reloj", pasoAtajos()),
+    tarjetaSync(),
     h("section", { class: "tarjeta" }, h("h3", {}, "Personalizar"),
       h("ul", { class: "lista" },
         h("li", {}, h("a", { class: "que", href: "#ajustes/avisos" }, "Avisos: textos, sonido y botones", h("small", {}, "Qué dice cada aviso y qué botones trae")), h("span", {}, "›")),
@@ -364,7 +459,7 @@ function vistaAjustes() {
       h("p", { class: "suave" }, "Suscríbete a este enlace desde Google Calendar, Apple o Outlook para ver tus bloques y lo medido."),
       feedUrl ? h("code", { class: "codigo" }, feedUrl) : h("button", { onclick: (e) => act(e.target, async () => { feedUrl = (await api("/api/feed")).url; }) }, "Mostrar enlace")),
     h("section", { class: "tarjeta" }, h("h3", {}, "Apariencia"),
-      h("p", { class: "suave" }, "Los colores, letras y logo vienen de una plantilla. Para personalizarla sin tocar el código, monta una carpeta con tu tema.css (y si quieres, letras e íconos) en /tema."),
+      h("p", { class: "suave" }, "Los colores, letras y logo vienen de una plantilla. Para personalizarla sin tocar el código, pon tu tema.css (y si quieres, letras e íconos) en la carpeta datos/tema de tu servidor."),
       h("button", { onclick: (e) => act(e.target, async () => { await api("/api/salir", { method: "POST" }); sesion.dentro = false; }) }, "Cerrar sesión")),
   ];
 }
@@ -405,46 +500,140 @@ function pasoAvisos() {
   ];
 }
 
+const ROLES = { leer: "Mostrar", plan: "Plan (tus bloques)", registrado: "Registrado (lo medido)", oculto: "Ocultar" };
+const TIPOS = { caldav: "CalDAV", google: "Google", outlook: "Outlook", markdown: "Markdown", notion: "Notion" };
+const recargarCuentas = async () => { cuentasCfg = await api("/api/cuentas"); };
+
+function estadoCuenta(c) {
+  if (!c.activa) return "esperando permiso";
+  if (c.ultimo_error) return `✗ ${c.ultimo_error}`;
+  return c.ultimo_ok ? `al día · ${hora(new Date(c.ultimo_ok).getTime())}` : "sincronizando…";
+}
+
 function pasoCalendarios() {
-  const nombre = h("input", { id: "cal-nombre", placeholder: "Trabajo, Personal…" });
-  const url = h("input", { id: "cal-url", placeholder: "https://…/basic.ics", autocomplete: "off" });
-  const cals = S.conexiones.calendarios;
+  const cals = cuentasCfg.cuentas.filter((c) => ["caldav", "google", "outlook"].includes(c.tipo));
+  const tienePlan = cals.some((c) => c.calendarios.some((k) => k.rol === "plan"));
+  const cuenta = (c) => h("div", { class: "cuenta" },
+    h("div", { class: "fila" }, h("b", { class: "crece" }, c.nombre, " ", h("span", { class: "etiqueta" }, TIPOS[c.tipo])),
+      h("button", { class: "icono peligro", title: "Desconectar", "aria-label": "Desconectar " + c.nombre, onclick: (e) => { if (confirm(`¿Desconectar ${c.nombre}? No borra nada en la cuenta.`)) act(e.target, async () => { await api(`/api/cuentas/${c.id}`, { method: "DELETE" }); await recargarCuentas(); }); } }, "✕")),
+    h("p", { class: "suave" }, estadoCuenta(c)),
+    c.activa ? h("ul", { class: "lista" }, c.calendarios.map((k) => h("li", {},
+      k.color ? h("span", { class: "color", style: `background:${k.color}` }) : null,
+      h("span", { class: "que" }, k.name, h("small", {}, k.editable ? "" : "solo lectura")),
+      h("select", { style: "width:auto", "aria-label": "Uso de " + k.name, onchange: (e) => act(e.target, async () => { await api(`/api/calendarios/${k.id}`, { method: "PATCH", body: { rol: e.target.value } }); await recargarCuentas(); }, "Listo.") },
+        Object.entries(ROLES).filter(([r]) => k.editable || r === "leer" || r === "oculto").map(([r, l]) => h("option", { value: r, selected: k.rol === r }, l)))))) : null,
+    c.activa ? h("div", { class: "fila", style: "flex-wrap:wrap;margin-top:.4rem" },
+      h("button", { onclick: (e) => act(e.target, async () => { await api(`/api/cuentas/${c.id}/crear-calendario`, { method: "POST", body: { rol: "plan" } }); await recargarCuentas(); }, "Creado «Veredicto · Plan».") }, "Crear «Veredicto · Plan»"),
+      h("button", { onclick: (e) => act(e.target, async () => { await api(`/api/cuentas/${c.id}/crear-calendario`, { method: "POST", body: { rol: "registrado" } }); await recargarCuentas(); }, "Creado «Veredicto · Registrado».") }, "Crear «Registrado»")) : null);
+
+  const form = {
+    icloud: () => {
+      const u = h("input", { id: "ic-u", type: "email", placeholder: "tu@icloud.com", autocomplete: "off" });
+      const k = h("input", { id: "ic-k", placeholder: "xxxx-xxxx-xxxx-xxxx", autocomplete: "off" });
+      return [
+        h("ol", { class: "pasos" },
+          h("li", {}, "Entra a ", h("a", { href: "https://account.apple.com", target: "_blank", rel: "noopener" }, "account.apple.com"), " → Inicio de sesión y seguridad → Contraseñas de apps → crea una llamada «Veredicto»."),
+          h("li", {}, "Pega tu correo de Apple y esa contraseña de app (no la de tu Apple ID). Requiere verificación en dos pasos.")),
+        h("label", { for: "ic-u" }, "Correo de Apple"), u, h("label", { for: "ic-k" }, "Contraseña de app"), k, h("p"),
+        h("button", { class: "primario", onclick: (e) => act(e.target, async () => { await api("/api/cuentas/caldav", { method: "POST", body: { nombre: "iCloud", usuario: u.value, clave: k.value } }); conectando = null; await recargarCuentas(); }, "iCloud conectado.") }, "Conectar iCloud"),
+      ];
+    },
+    caldav: () => {
+      const url = h("input", { id: "cd-url", placeholder: "https://servidor/dav/", autocomplete: "off" });
+      const u = h("input", { id: "cd-u", autocomplete: "off" }), k = h("input", { id: "cd-k", type: "password", autocomplete: "off" });
+      return [
+        h("p", { class: "suave" }, "Fastmail: https://caldav.fastmail.com/ · Nextcloud: https://tu-nube/remote.php/dav/ · Synology: https://tu-nas:5001/caldav/"),
+        h("label", { for: "cd-url" }, "Dirección CalDAV"), url, h("label", { for: "cd-u" }, "Usuario"), u, h("label", { for: "cd-k" }, "Contraseña de app"), k, h("p"),
+        h("button", { class: "primario", onclick: (e) => act(e.target, async () => { await api("/api/cuentas/caldav", { method: "POST", body: { nombre: "CalDAV", url: url.value, usuario: u.value, clave: k.value } }); conectando = null; await recargarCuentas(); }, "Conectado.") }, "Conectar"),
+      ];
+    },
+    google: () => oauthForm("google", [
+      h("li", {}, "Entra a ", h("a", { href: "https://console.cloud.google.com/projectcreate", target: "_blank", rel: "noopener" }, "Google Cloud"), " y crea un proyecto «Veredicto»."),
+      h("li", {}, "APIs y servicios → Biblioteca → activa «Google Calendar API»."),
+      h("li", {}, "Pantalla de consentimiento: tipo Externo, agrega tu correo como usuario de prueba y luego toca «Publicar app» (si queda en Prueba, el permiso vence cada 7 días)."),
+      h("li", {}, "Credenciales → Crear → ID de cliente OAuth → Aplicación web. En «URI de redireccionamiento autorizados» pega:", h("code", { class: "codigo" }, cuentasCfg.redirect.google || "define URL_PUBLICA en .env")),
+      h("li", {}, "Copia el ID y el secreto aquí. Google te mostrará «app no verificada»: es tu propia app, toca Avanzado → Ir a Veredicto.")]),
+    outlook: () => oauthForm("outlook", [
+      h("li", {}, "Entra a ", h("a", { href: "https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade", target: "_blank", rel: "noopener" }, "Microsoft Entra → Registros de aplicaciones"), " → Nuevo registro «Veredicto»."),
+      h("li", {}, "Tipos de cuenta: «Cuentas en cualquier directorio y cuentas personales de Microsoft»."),
+      h("li", {}, "URI de redirección (Web):", h("code", { class: "codigo" }, cuentasCfg.redirect.outlook || "define URL_PUBLICA en .env")),
+      h("li", {}, "Certificados y secretos → Nuevo secreto de cliente. Copia el «Valor» (no el ID del secreto) y el «Id. de aplicación (cliente)».")]),
+    ical: () => {
+      const n = h("input", { id: "cal-nombre", placeholder: "Feriados, equipo…" });
+      const url = h("input", { id: "cal-url", placeholder: "https://…/basic.ics", autocomplete: "off" });
+      return [
+        h("p", { class: "suave" }, "Para calendarios ajenos que solo quieres ver (feriados, el de tu equipo). Se relee cada 10 minutos."),
+        h("label", { for: "cal-nombre" }, "Nombre"), n, h("label", { for: "cal-url" }, "Enlace iCal"), url, h("p"),
+        h("button", { class: "primario", onclick: (e) => act(e.target, async () => { await api("/api/calendarios", { method: "POST", body: { name: n.value || "Calendario", url: url.value } }); conectando = null; await recargarCuentas(); }, "Agregado.") }, "Agregar"),
+      ];
+    },
+  };
+  const opciones = { icloud: "iCloud", google: "Google", outlook: "Outlook", caldav: "Otro CalDAV", ical: "Enlace iCal (solo ver)" };
   return [
-    h("p", { class: "suave" }, "Leo tus calendarios con su enlace iCal secreto (solo lectura, sin dar contraseñas). Se actualizan cada 10 minutos y bloquean «Armar mi día»."),
-    h("details", {}, h("summary", {}, "¿Dónde está el enlace?"),
-      h("p", {}, h("b", {}, "Google: "), "calendar.google.com → ⚙ Configuración → elige el calendario → «Dirección secreta en formato iCal»."),
-      h("p", {}, h("b", {}, "iCloud: "), "app Calendario → (i) junto al calendario → «Calendario público» → Compartir enlace (webcal://…)."),
-      h("p", {}, h("b", {}, "Outlook: "), "outlook.com → ⚙ → Calendario → Calendarios compartidos → Publicar → copia el enlace ICS.")),
-    cals.length ? h("ul", { class: "lista" }, cals.map((c) => h("li", {},
-      h("span", { class: "que" }, c.name, h("small", {}, c.error ? `✗ ${c.error}` : c.last_ok_at ? `al día · ${hora(c.last_ok_at)}` : "pendiente")),
-      h("button", { class: "icono", title: "Quitar", onclick: (e) => act(e.target, () => api(`/api/calendarios/${c.id}`, { method: "DELETE" })) }, "✕")))) : null,
-    h("label", { for: "cal-nombre" }, "Nombre"), nombre, h("label", { for: "cal-url" }, "Enlace iCal"), url, h("p"),
-    h("div", { class: "fila" },
-      h("button", { class: "primario", onclick: (e) => act(e.target, async () => { await api("/api/calendarios", { method: "POST", body: { name: nombre.value || "Calendario", url: url.value } }); }, "Calendario agregado.") }, "Agregar"),
-      cals.length ? h("button", { onclick: (e) => act(e.target, () => api("/api/calendarios/refrescar", { method: "POST" }), "Actualizado.") }, "Actualizar ahora") : null),
+    h("p", { class: "suave" }, "Se sincronizan en ambos sentidos cada 2 minutos: lo que mueves aquí aparece en tu teléfono y al revés. Elige un calendario como «Plan»: ahí van los bloques que armas en la app."),
+    ...cals.map(cuenta),
+    cuentasCfg.ical.length ? h("div", { class: "cuenta" }, h("b", {}, "Enlaces iCal (solo ver)"), h("ul", { class: "lista" }, cuentasCfg.ical.map((k) => h("li", {},
+      h("span", { class: "que" }, k.name, h("small", {}, k.last_error ? `✗ ${k.last_error}` : k.last_ok_at ? "al día" : "pendiente")),
+      h("button", { class: "icono", title: "Quitar", onclick: (e) => act(e.target, async () => { await api(`/api/calendarios/${k.id}`, { method: "DELETE" }); await recargarCuentas(); }) }, "✕"))))) : null,
+    cals.length && !tienePlan ? h("p", { class: "aviso-suave" }, "Falta elegir el calendario «Plan»: crea «Veredicto · Plan» en la cuenta que más miras en el teléfono.") : null,
+    h("div", { class: "chips" }, Object.entries(opciones).map(([k, l]) => h("button", { class: "chip" + (conectando === k ? " activa" : ""), onclick: () => { conectando = conectando === k ? null : k; render(); } }, "+ ", l))),
+    form[conectando] ? h("div", { class: "cuenta" }, ...form[conectando]()) : null,
   ];
 }
 
-function pasoNotion() {
-  const n = S.conexiones.notion;
-  if (n.ok) return [
-    h("p", {}, n.pendientes ? `Copiando a Notion: ${n.pendientes} pendientes.` : "Todo copiado a Notion."),
-    n.error ? h("p", { class: "suave" }, `Último error: ${n.error}`) : null,
-    h("p", { class: "suave" }, "Notion es una copia: tareas, tiempo registrado y notas. Lo que cambies allá no vuelve (así nunca hay conflictos)."),
-    h("div", { class: "fila" }, h("button", { onclick: (e) => act(e.target, () => api("/api/notion/reintentar", { method: "POST" }), "Reintentado.") }, "Reintentar ahora"),
-      h("button", { class: "peligro", onclick: (e) => { if (confirm("¿Desconectar Notion? No borra nada allá.")) act(e.target, () => api("/api/notion", { method: "DELETE" })); } }, "Desconectar")),
+function oauthForm(tipo, pasos) {
+  const id = h("input", { id: `${tipo}-id`, autocomplete: "off" }), sec = h("input", { id: `${tipo}-sec`, type: "password", autocomplete: "off" });
+  return [
+    h("ol", { class: "pasos" }, pasos),
+    h("label", { for: id.id }, "ID de cliente"), id, h("label", { for: sec.id }, "Secreto de cliente"), sec, h("p"),
+    h("button", { class: "primario", onclick: (e) => act(e.target, async () => {
+      const r = await api(`/api/cuentas/${tipo}/oauth`, { method: "POST", body: { client_id: id.value, client_secret: sec.value } });
+      location.href = r.url;
+    }) }, `Dar permiso en ${tipo === "google" ? "Google" : "Microsoft"}`),
   ];
-  const tok = h("input", { id: "n-token", placeholder: "ntn_… o secret_…", autocomplete: "off" });
+}
+
+function pasoNotas() {
+  const notas = cuentasCfg.cuentas.filter((c) => c.tipo === "markdown" || c.tipo === "notion");
+  const carpeta = h("input", { id: "md-dir", value: cuentasCfg.carpeta_notas });
+  const tok = h("input", { id: "n-token", placeholder: "ntn_…", autocomplete: "off" });
   const pag = h("input", { id: "n-pag", placeholder: "https://www.notion.so/Mi-pagina-…" });
   return [
-    h("ol", { class: "pasos" },
-      h("li", {}, "Entra a ", h("a", { href: "https://www.notion.so/profile/integrations", target: "_blank", rel: "noopener" }, "notion.so/profile/integrations"), " → Nueva integración (interna) → copia el token."),
-      h("li", {}, "Crea una página vacía en Notion (ej: «Juez del Tiempo»)."),
-      h("li", {}, "En esa página: ••• → Conexiones → agrega tu integración."),
-      h("li", {}, "Pega aquí el token y el enlace de la página. Creo tres bases: Tareas, Tiempo registrado y Capturas y notas.")),
-    h("label", { for: "n-token" }, "Token"), tok, h("label", { for: "n-pag" }, "Enlace de la página"), pag, h("p"),
-    h("button", { class: "primario", onclick: (e) => act(e.target, () => api("/api/notion", { method: "POST", body: { token: tok.value.trim(), pagina: pag.value.trim() } }), "Notion conectado.") }, "Conectar Notion"),
+    h("p", { class: "suave" }, "Cada casilla «- [ ]» de tus notas aparece en Gestiones. Márcala aquí o allá y queda marcada en ambos. Las capturas de Siri y Android se agregan a una nota «Bandeja» del día."),
+    ...notas.map((c) => h("div", { class: "cuenta" },
+      h("div", { class: "fila" }, h("b", { class: "crece" }, c.nombre, " ", h("span", { class: "etiqueta" }, TIPOS[c.tipo])),
+        h("button", { class: "icono peligro", title: "Desconectar", onclick: (e) => { if (confirm(`¿Desconectar ${c.nombre}? Tus notas no se tocan.`)) act(e.target, async () => { await api(`/api/cuentas/${c.id}`, { method: "DELETE" }); await recargarCuentas(); }); } }, "✕")),
+      h("p", { class: "suave" }, `${estadoCuenta(c)} · ${c.notas.n} notas con casillas · ${c.notas.abiertas || 0} abiertas`),
+      h("label", {}, h("input", { type: "radio", name: "bandeja", style: "width:auto", checked: cuentasCfg.bandeja === c.id, onchange: (e) => act(e.target, async () => { await api("/api/bandeja-destino", { method: "PUT", body: { cuenta_id: c.id } }); await recargarCuentas(); }, "Las capturas irán aquí.") }), " Las capturas van aquí"))),
+    h("div", { class: "chips" },
+      h("button", { class: "chip" + (conectando === "md" ? " activa" : ""), onclick: () => { conectando = conectando === "md" ? null : "md"; render(); } }, "+ Carpeta Markdown (Obsidian)"),
+      h("button", { class: "chip" + (conectando === "notion" ? " activa" : ""), onclick: () => { conectando = conectando === "notion" ? null : "notion"; render(); } }, "+ Notion")),
+    conectando === "md" ? h("div", { class: "cuenta" },
+      h("p", { class: "suave" }, "La carpeta tiene que estar montada en el contenedor. Por defecto es la carpeta «notas» dentro de tus datos; para usar tu bóveda de Obsidian, móntala en compose.yaml (ver README)."),
+      h("label", { for: "md-dir" }, "Carpeta dentro del contenedor"), carpeta, h("p"),
+      h("button", { class: "primario", onclick: (e) => act(e.target, async () => { await api("/api/cuentas/markdown", { method: "POST", body: { carpeta: carpeta.value } }); conectando = null; await recargarCuentas(); }, "Notas conectadas.") }, "Conectar carpeta")) : null,
+    conectando === "notion" ? h("div", { class: "cuenta" },
+      h("ol", { class: "pasos" },
+        h("li", {}, "Entra a ", h("a", { href: "https://www.notion.so/profile/integrations", target: "_blank", rel: "noopener" }, "notion.so/profile/integrations"), " → Nueva integración (interna) → copia el token."),
+        h("li", {}, "Elige la página que contiene tus notas: ••• → Conexiones → agrega tu integración. Todo lo que cuelga de ella queda visible."),
+        h("li", {}, "Pega aquí el token y el enlace de esa página.")),
+      h("label", { for: "n-token" }, "Token"), tok, h("label", { for: "n-pag" }, "Enlace de la página"), pag, h("p"),
+      h("button", { class: "primario", onclick: (e) => act(e.target, async () => { await api("/api/cuentas/notion", { method: "POST", body: { token: tok.value.trim(), pagina: pag.value.trim() } }); conectando = null; await recargarCuentas(); }, "Notion conectado.") }, "Conectar Notion")) : null,
   ];
+}
+
+function tarjetaSync() {
+  const cx = S.conexiones;
+  if (!cx.cuentas.length) return null;
+  return h("section", { class: "tarjeta" }, h("h3", {}, "Sincronización"),
+    h("p", { class: "suave" }, cx.cola.pendientes ? `${cx.cola.pendientes} cambios por enviar${cx.cola.error ? ` · último error: ${cx.cola.error}` : ""}` : "Todo enviado."),
+    h("div", { class: "fila", style: "flex-wrap:wrap" },
+      h("button", { onclick: (e) => act(e.target, async () => { await api("/api/sincronizar", { method: "POST" }); await recargarCuentas(); }, "Sincronizado.") }, "Sincronizar ahora"),
+      cx.conflictos ? h("button", { onclick: (e) => act(e.target, async () => { conflictosLista = await api("/api/conflictos"); }) }, `Revisar ${cx.conflictos} conflictos`) : null),
+    conflictosLista ? h("ul", { class: "lista" }, conflictosLista.filter((c) => !c.revisado).map((c) => h("li", {},
+      h("span", { class: "que" }, c.titulo, h("small", {}, `${new Date(c.creado).toLocaleString("es-CL")} · ganó ${c.ganador === "remoto" ? "el cambio de afuera" : "tu cambio"}${c.perdedor.borrado_afuera ? " (lo borraron afuera)" : ` · se perdió: «${c.perdedor.title}» ${hora(c.perdedor.start)}`}`)),
+      c.perdedor.borrado_afuera ? null : h("button", { title: "Volver a la versión perdida", onclick: (e) => act(e.target, async () => { await api(`/api/conflictos/${c.id}/deshacer`, { method: "POST" }); conflictosLista = await api("/api/conflictos"); }, "Restaurado.") }, "Deshacer"),
+      h("button", { class: "icono", title: "Entendido", onclick: (e) => act(e.target, async () => { await api(`/api/conflictos/${c.id}/revisado`, { method: "POST" }); conflictosLista = await api("/api/conflictos"); }) }, "✓")))) : null);
 }
 
 function pasoAtajos() {
@@ -459,7 +648,7 @@ function pasoAtajos() {
         h("ol", { class: "pasos" },
           h("li", {}, "Atajos → + → acción «Obtener contenido de URL»."),
           h("li", {}, "URL: ", h("code", {}, url("alternar")), ". Método POST. Encabezado ", h("code", {}, "Authorization"), " = ", h("code", {}, `Bearer ${t.slice(0, 8)}…`)),
-          h("li", {}, "Agrega «Mostrar resultado». Nómbralo «Juez» y di: «Oye Siri, Juez»."),
+          h("li", {}, "Agrega «Mostrar resultado». Nómbralo «Veredicto» y di: «Oye Siri, Veredicto»."),
           h("li", {}, "Para elegir qué iniciar: «Obtener contenido de URL» a ", h("code", {}, url("opciones")), " → «Dividir texto» por saltos de línea → «Elegir de la lista» → «Obtener contenido de URL» POST a ", h("code", {}, url("iniciar")), " con cuerpo Texto = elemento elegido."),
           h("li", {}, "Capturar por voz: «Dictar texto» → POST a ", h("code", {}, url("capturar")), " con el texto dictado."))),
       h("details", {}, h("summary", {}, "Android"),
@@ -484,7 +673,7 @@ const PRIORIDADES = { 1: "1 · mínima (sin sonido)", 2: "2 · baja", 3: "3 · n
 function vistaPlantillas() {
   if (!PL) { api("/api/plantillas").then((r) => { PL = r; render(); }).catch((e) => toast(e.message, true)); return h("p", { class: "cargando" }, "Cargando…"); }
   const E = PL.efectivas, tuyas = PL.tuyas.eventos || {};
-  const prefijo = h("input", { id: "pl-prefijo", value: E.global.prefijo || "", placeholder: "Ej: JOACO · " });
+  const prefijo = h("input", { id: "pl-prefijo", value: E.global.prefijo || "", placeholder: "Ej: EQUIPO · " });
   const icono = h("input", { id: "pl-icono", type: "checkbox", style: "width:auto", checked: E.global.icono !== false });
   const guardarGlobal = (e) => act(e.target, async () => { const r = await api("/api/plantillas", { method: "PUT", body: { global: { prefijo: prefijo.value, icono: icono.checked } } }); PL.efectivas = r.efectivas; PL = null; }, "Guardado.");
   const evento = (key) => {

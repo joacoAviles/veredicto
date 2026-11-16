@@ -1,16 +1,24 @@
-# Juez del Tiempo: app + base de datos. El túnel de Cloudflare es opcional (perfil "tunel").
+# Veredicto — el juez de tu tiempo, en tu servidor.
+# Todo lo tuyo queda en la carpeta DATOS (por defecto ./datos): base, tema, notas, respaldos y clave.
+name: veredicto
+
 services:
   app:
-    build: .
-    image: juez-del-tiempo:latest
+    image: ghcr.io/joacoaviles/veredicto:${VEREDICTO_VERSION:-latest}
     restart: unless-stopped
     env_file: .env
+    user: "${PUID:-1000}:${PGID:-1000}"
     environment:
-      DATABASE_URL: postgres://juez:${DB_PASSWORD:?pon DB_PASSWORD en .env}@db:5432/juez
+      DATABASE_URL: postgres://veredicto:${DB_PASSWORD:?Falta DB_PASSWORD en .env}@db:5432/veredicto
+      DATOS_DIR: /datos
     ports:
-      - "127.0.0.1:${PUERTO:-8080}:8080"
+      - "${ESCUCHAR:-127.0.0.1}:${PUERTO:-8080}:8080"
     volumes:
-      - ./tema:/tema:ro
+      - ${DATOS:-./datos}/tema:/datos/tema
+      - ${DATOS:-./datos}/notas:/datos/notas
+      - ${DATOS:-./datos}/clave:/datos/clave
+      # Para usar tu bóveda de Obsidian (por ejemplo en el Synology), descomenta y ajusta:
+      # - /volume1/Obsidian/MiBoveda:/datos/obsidian
     depends_on:
       db:
         condition: service_healthy
@@ -19,25 +27,50 @@ services:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: juez
+      POSTGRES_USER: veredicto
       POSTGRES_PASSWORD: ${DB_PASSWORD}
-      POSTGRES_DB: juez
+      POSTGRES_DB: veredicto
     volumes:
-      - datos:/var/lib/postgresql/data
+      - ${DATOS:-./datos}/db:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U juez -d juez"]
+      test: ["CMD-SHELL", "pg_isready -U veredicto -d veredicto"]
       interval: 5s
       timeout: 5s
       retries: 20
 
+  # Respaldo diario de la base a las 03:00 (se guardan los últimos 14).
+  respaldo:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      PGPASSWORD: ${DB_PASSWORD}
+      TZ: ${ZONA_HORARIA:-America/Santiago}
+    volumes:
+      - ${DATOS:-./datos}/respaldos:/respaldos
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Respaldo diario a las 03:00 en /respaldos"
+        while true; do
+          if [ "$$(date +%H%M)" = "0300" ]; then
+            f=/respaldos/veredicto-$$(date +%F).sql.gz
+            pg_dump -h db -U veredicto veredicto | gzip > "$$f.tmp" && mv "$$f.tmp" "$$f" && echo "Respaldo: $$f"
+            ls -1t /respaldos/veredicto-*.sql.gz 2>/dev/null | tail -n +15 | xargs -r rm -f
+            sleep 61
+          fi
+          sleep 30
+        done
+
+  # Opcional: publica la app en tu dominio con Cloudflare Tunnel.
+  # Actívalo con: docker compose --profile tunel up -d
   tunel:
     image: cloudflare/cloudflared:latest
     profiles: ["tunel"]
     restart: unless-stopped
     command: tunnel --no-autoupdate run
     environment:
-      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?pon TUNNEL_TOKEN en .env}
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
     depends_on: [app]
-
-volumes:
-  datos:

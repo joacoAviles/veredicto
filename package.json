@@ -1,7 +1,7 @@
 {
-  "name": "juez-del-tiempo",
-  "version": "1.0.0",
-  "description": "Registro de tiempo autoalojado: un servidor, tus calendarios, Notion y avisos que no te dejan olvidar registrar.",
+  "name": "veredicto",
+  "version": "2.0.0",
+  "description": "Veredicto: el juez de tu tiempo, en tu servidor. Calendarios y notas en ambos sentidos, registro de tiempo y un vigilante que reclama.",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -9,11 +9,12 @@
   },
   "scripts": {
     "start": "node src/server.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test --test-concurrency=1 test/*.test.js"
   },
   "dependencies": {
     "@notionhq/client": "2.3.0",
     "express": "4.22.3",
+    "fast-xml-parser": "^4.5.0",
     "pg": "8.13.1"
   }
 }

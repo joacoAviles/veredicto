@@ -15,11 +15,11 @@ Crea un token en **Ajustes → Atajos** (uno por dispositivo). Todas las direcci
 
 ## iPhone (Siri)
 
-**«Juez» (un toque):**
+**«Veredicto» (un toque):**
 1. Atajos → **+** → *Obtener contenido de URL*.
 2. URL `https://TU-DOMINIO/api/atajo/alternar`, Método **POST**, Encabezados: `Authorization` = `Bearer TOKEN`.
 3. *Mostrar notificación* con *Contenido de URL*.
-4. Nómbralo «Juez». Siri: «Oye Siri, Juez». Ponlo también en la pantalla de inicio, el botón de acción o el Apple Watch.
+4. Nómbralo «Veredicto». Siri: «Oye Siri, Veredicto». Ponlo también en la pantalla de inicio, el botón de acción o el Apple Watch.
 
 **«Iniciar…» (elegir de la lista):**
 1. *Obtener contenido de URL* → `.../api/atajo/opciones` (GET, mismo encabezado).
@@ -35,7 +35,7 @@ Crea un token en **Ajustes → Atajos** (uno por dispositivo). Todas las direcci
 ## Android
 
 - **Instala la app** desde Chrome (⋮ → Instalar app). Mantén presionado el ícono: *Parar*, *Capturar*, *Armar mi día*.
-- **Compartir**: desde cualquier app, compartir → Juez del Tiempo → queda en la bandeja.
+- **Compartir**: desde cualquier app, compartir → Veredicto → queda en la bandeja.
 - **Botones en la pantalla de inicio**: app *HTTP Shortcuts* (gratis) → nuevo atajo → POST `.../api/atajo/alternar` con encabezado `Authorization: Bearer TOKEN` → Respuesta: *mostrar como aviso (toast)*. Agrega el widget. Repite con `iniciar?que=Gimnasio`, etc.
 - **Tasker / Automate**: la misma petición HTTP en cualquier perfil (llegar a un lugar, conectar el Bluetooth del auto…).
 

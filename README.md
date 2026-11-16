@@ -1,81 +1,99 @@
-# Juez del Tiempo
+# Veredicto
 
-Registro de tiempo autoalojado, en español. Un solo servidor guarda todo; el celular, el computador, Siri, Android y el reloj son solo ventanas. **No hay sincronización que pueda fallar**: lo que inicias desde un aviso, un atajo o la web es lo mismo que ves en todas partes, al instante.
+**El juez de tu tiempo, en tu servidor.**
 
-- **Hoy**: qué estás haciendo, tu agenda (tus bloques + tus calendarios), sugerencias según lo que sueles hacer a esta hora.
-- **Armar mi día**: agenda sola tus hábitos (lo que registras seguido a la misma hora) y tus rutinas, sin pisar tus reuniones. Puede hacerlo cada mañana y mandarte el resumen.
-- **Vigilante**: si no registras nada, te reclama a los 10, 30 y 60 minutos, y después cada 10. Si tienes algo agendado, te avisa con el botón para iniciarlo.
-- **Conectores**: avisos por ntfy, Telegram o webhook · calendarios de Google, iCloud y Outlook (enlace iCal, solo lectura) · copia a Notion (tareas, tiempo y notas) · feed iCal propio.
-- **Atajos**: Siri, Android (accesos del ícono, compartir, HTTP Shortcuts) y relojes, con respuestas en texto simple.
-- **Plantilla**: colores, letras y logo en un CSS aparte. Montas tu tema sin tocar el código.
+Veredicto junta tus calendarios (Google, iCloud, Outlook, CalDAV) y tus notas (Obsidian o Notion) en una sola agenda, mide lo que realmente haces y te reclama cuando no estás registrando nada. Se instala como Immich: un `docker compose` en tu servidor. Lo único público es la herramienta; tus datos, tus cuentas y tu tema viven en tu carpeta `datos/` y nunca salen de ahí.
 
-## Instalar (Docker)
+- **Calendarios en ambos sentidos.** Lo que mueves en Veredicto aparece en tu teléfono y al revés, cada 2 minutos. Tus bloques van a un calendario propio, «Veredicto · Plan»; lo medido, opcionalmente, a «Veredicto · Registrado».
+- **Notas = gestiones.** Cada casilla `- [ ]` de tus notas es una gestión. Márcala en la app, en Obsidian o en Notion y queda marcada en todos lados. Lo que capturas con Siri o Android cae en una nota «Bandeja» del día.
+- **Registro de tiempo** con una sola actividad abierta a la vez, desde la web, Siri, Android o el reloj.
+- **Vigilante.** Si no registras nada, te avisa a los 10, 30 y 60 minutos y después cada 10. Si algo agendado empieza, te manda el botón para iniciarlo. Funciona por ntfy, Telegram o webhook, con textos editables.
+- **Armar mi día.** Aprende tus hábitos (lo mismo a una hora parecida varios días) y te arma el día sin pisar tus reuniones. Tú decides qué puede agendar solo, qué solo sugerir y qué ignorar.
+- **Tu marca.** Colores, letras, logo y la voz de los avisos son una plantilla en `datos/tema/`.
 
-```bash
-git clone https://github.com/<tu-usuario>/juez-del-tiempo.git
-cd juez-del-tiempo
-cp .env.example .env        # edita DB_PASSWORD y URL_PUBLICA
-docker compose up -d --build
-docker compose logs app     # aquí aparece el código de instalación
-```
+## Instalar
 
-Abre `http://localhost:8080`, pega el código, elige tu contraseña y sigue los 4 pasos (avisos, calendarios, Notion, atajos).
-
-### Publicarlo con Cloudflare Tunnel
-
-1. Cloudflare → Zero Trust → Networks → Tunnels → **Create tunnel** (cloudflared) → copia el token.
-2. En el túnel: **Public hostname** → tu subdominio → servicio `http://app:8080`.
-3. En `.env`: `TUNNEL_TOKEN=...` y `URL_PUBLICA=https://tu-subdominio`.
-4. `docker compose --profile tunel up -d`
-
-### Actualizar
+Necesitas un servidor con Docker y Docker Compose v2 (un mini PC, un NAS Synology, un Mac con Colima o OrbStack, un VPS).
 
 ```bash
-git pull && docker compose up -d --build
+curl -fsSL https://github.com/joacoAviles/veredicto/releases/latest/download/instalar.sh | sh
 ```
 
-### Respaldo
+El instalador crea la carpeta `veredicto/` con `compose.yaml`, un `.env` con contraseñas al azar y la carpeta `datos/`, baja la imagen y la levanta. Al final te muestra el **código de instalación**. Abre `http://localhost:8080`, pega el código, elige tu contraseña y sigue los 4 pasos del asistente:
+
+1. **Avisos al celular:** ntfy (gratis), Telegram o webhook. Con «Probar» llega uno de prueba.
+2. **Calendarios:** iCloud, Google, Outlook, otro CalDAV o un enlace iCal de solo lectura. Después crea «Veredicto · Plan» en la cuenta que más miras.
+3. **Notas:** una carpeta Markdown (tu bóveda de Obsidian) o una página de Notion.
+4. **Atajos:** un token por dispositivo para Siri, Android y el reloj.
+
+### Instalación a mano
 
 ```bash
-docker compose exec db pg_dump -U juez juez > respaldo-$(date +%F).sql
+mkdir veredicto && cd veredicto
+curl -LO https://github.com/joacoAviles/veredicto/releases/latest/download/compose.yaml
+curl -L -o .env https://github.com/joacoAviles/veredicto/releases/latest/download/example.env
+nano .env                      # DB_PASSWORD, CLAVE_CIFRADO, URL_PUBLICA
+mkdir -p datos/db datos/tema datos/notas datos/respaldos datos/clave
+docker compose up -d
+docker compose logs app        # aquí está el código de instalación
 ```
 
-## Tu propio tema
+### Publicarlo en tu dominio (Cloudflare Tunnel)
 
-Crea una carpeta `tema/` junto a `compose.yaml` con un `tema.css` (copia `themes/neutro.css` como punto de partida). Opcionales en la misma carpeta: `icono.svg`, `icono-180.png`, `icono-192.png`, `icono-512.png`, y letras u otros archivos, que se sirven en `/tema/…`. La carpeta `tema/` está en `.gitignore`: tu marca no se mezcla con el repositorio.
+Para que funcionen los botones de los avisos y la conexión con Google u Outlook, Veredicto necesita una dirección `https`. Ver [docs/tunel.md](docs/tunel.md).
 
-Variables que puedes cambiar: `--fondo`, `--superficie`, `--texto`, `--suave`, `--linea`, `--acento`, `--acento-texto`, `--peligro`, `--ok`, `--fuente`, `--fuente-titulos`, `--mayus-titulos`, `--radio`, `--sombra`, `--logo`.
+## Guías
 
-## Avisos personalizables
+| Para | Guía |
+| --- | --- |
+| iCloud (contraseña de app) | [docs/icloud.md](docs/icloud.md) |
+| Google Calendar (tu cliente OAuth) | [docs/google.md](docs/google.md) |
+| Outlook / Microsoft 365 (tu app de Azure) | [docs/outlook.md](docs/outlook.md) |
+| Obsidian y Notion | [docs/notas.md](docs/notas.md) |
+| Siri, Android y relojes | [docs/atajos.md](docs/atajos.md) |
+| Dominio con Cloudflare Tunnel | [docs/tunel.md](docs/tunel.md) |
+| Tema, logo y voz de los avisos | [docs/tema.md](docs/tema.md) |
 
-Cada aviso (antes de algo agendado, empezó lo agendado, sin registrar ×3 niveles, se pasó de lo estimado, resumen de la mañana) tiene título, mensaje, prioridad/sonido, etiquetas (emoji de ntfy) y hasta 3 botones. Tres capas, la última manda:
+## Dónde vive cada cosa
 
-1. **Fábrica** (`src/plantillas.js`).
-2. **Equipo**: `tema/avisos.json` (ver `themes/avisos.ejemplo.json`). Así cada equipo trae su voz junto a su tema visual.
-3. **Tuyas**: Ajustes → Personalizar → Avisos. Botón «Probar» manda uno de prueba; «Volver a la del equipo» deshace.
+| Qué | Dónde |
+| --- | --- |
+| Código e imagen Docker | GitHub y `ghcr.io/joacoaviles/veredicto` (públicos) |
+| Base de datos | `datos/db` |
+| Credenciales de tus cuentas | En la base, cifradas con AES-256-GCM; la clave está en `.env` o en `datos/clave/` |
+| Tema, logo, avisos del equipo | `datos/tema/` |
+| Notas Markdown | `datos/notas/` o la carpeta que montes |
+| Respaldos diarios (03:00, se guardan 14) | `datos/respaldos/` |
 
-Variables: `{titulo} {hora} {fin} {minutos} {sin_registrar} {sugerencia} {lleva} {estimado} {agenda} {nombre}`.
-Botones: `iniciar sugerencia1 sugerencia2 seguir parar silenciar30 silenciar60 armar abrir`.
+No hay servidor central ni telemetría. Veredicto solo habla con tus propias cuentas y con el canal de avisos que elijas.
 
-## Qué aprende el algoritmo
+## Actualizar, respaldar, mover
 
-Ajustes → Personalizar → Qué aprende el algoritmo. Muestra los hábitos detectados (lo mismo, a una hora parecida, varios días) y por cada tarea o rutina eliges: **Agendar solo** (entra en «Armar mi día»), **Solo sugerir** (aparece en Hoy y en los botones de los avisos) o **Ignorar**. También ajustas historial, mínimo de días, constancia, tolerancia de hora y qué hacer con un hábito nuevo.
+```bash
+docker compose pull && docker compose up -d     # actualizar (las migraciones corren solas)
+./restaurar.sh datos/respaldos/veredicto-AAAA-MM-DD.sql.gz   # restaurar un respaldo
+```
 
-## Cómo funciona
+Para fijar una versión, pon `VEREDICTO_VERSION=v2.0.0` en `.env`. Para mover Veredicto a otro servidor, copia la carpeta completa (`compose.yaml`, `.env` y `datos/`).
 
-- PostgreSQL es la única verdad. Una sola actividad abierta a la vez (lo garantiza la base de datos).
-- La pantalla se actualiza en vivo (Server-Sent Events) y no guarda datos en el teléfono.
-- Notion es una **copia de una sola dirección** con cola y reintentos: si Notion falla, no pierdes nada y no hay conflictos.
-- Los botones de los avisos son enlaces firmados que vencen en 12 horas.
+**Guarda una copia de `.env`.** Sin la `CLAVE_CIFRADO` no se pueden leer las cuentas conectadas: tendrías que volver a conectarlas.
 
-Atajos paso a paso: [docs/atajos.md](docs/atajos.md).
+## Cómo sincroniza
+
+- Cada cuenta externa sigue siendo dueña de lo suyo. Veredicto guarda un espejo y una cola de cambios con reintentos.
+- Trae solo una ventana de 14 días hacia atrás y 60 hacia adelante.
+- Si el mismo evento cambia en los dos lados entre dos pasadas, gana el más reciente. El otro queda en «Revisar conflictos», donde puedes deshacerlo.
+- Si borras algo afuera, en Veredicto pasa a una papelera 30 días. Los eventos repetidos se ven, pero se editan en su calendario de origen.
+- Si una cuenta lleva más de 1 hora fallando, te llega un aviso.
 
 ## Desarrollo
 
 ```bash
 npm install
-TEST_DATABASE_URL=postgres://usuario@localhost:5432/prueba npm test
-DATABASE_URL=postgres://usuario@localhost:5432/juez npm start
+TEST_DATABASE_URL=postgres://usuario@localhost:5432/prueba RADICALE_URL=http://127.0.0.1:5232/ npm test
+DATABASE_URL=postgres://usuario@localhost:5432/veredicto DATOS_DIR=./datos npm start
 ```
+
+Las pruebas usan PostgreSQL real y un servidor CalDAV real (Radicale: `pip install radicale`). Para publicar una versión, crea la etiqueta: `git tag v2.0.0 && git push --tags`. GitHub Actions publica la imagen (amd64 y arm64) y adjunta `compose.yaml`, `example.env`, `instalar.sh` y `restaurar.sh` a la versión.
 
 Licencia MIT.

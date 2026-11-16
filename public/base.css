@@ -84,3 +84,17 @@ body.accion .tarjeta { max-width: 420px; width: 100%; text-align: center; }
 @media (min-width: 800px) {
   .pestanas { left: 50%; right: auto; width: 760px; transform: translateX(-50%); border: 1px solid var(--linea); border-bottom: 0; border-radius: var(--radio) var(--radio) 0 0; }
 }
+
+/* Cuentas, agenda y diálogo */
+.cuenta { border: 1px solid var(--linea); border-radius: calc(var(--radio) * .7); padding: .7rem .8rem; margin: .6rem 0; }
+.cuenta .suave { margin: .2rem 0 .4rem; overflow-wrap: anywhere; }
+.color { display: inline-block; width: .7em; height: .7em; border-radius: 50%; margin-right: .45em; vertical-align: .05em; flex: none; }
+.chip.activa { background: var(--acento); color: var(--acento-texto); border-color: var(--acento); }
+.aviso-suave { background: color-mix(in srgb, var(--acento) 12%, transparent); border-radius: 8px; padding: .6em .8em; }
+.dialogo { border: 1px solid var(--linea); border-radius: var(--radio); background: var(--superficie); color: var(--texto); width: min(440px, 92vw); padding: 1.1rem; }
+.dialogo::backdrop { background: rgba(0, 0, 0, .45); }
+.dialogo .fila { margin-top: .8rem; }
+button.icono.peligro { color: var(--peligro); }
+.cuenta .lista li { flex-wrap: wrap; }
+.cuenta .lista li .que { min-width: 40%; }
+.cuenta .lista li select { max-width: 55%; flex: 0 1 auto; font-size: .9rem; padding: .45em .5em; }

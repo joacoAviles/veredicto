@@ -33,7 +33,7 @@ export function construirAviso(plantillas, key, vars, op = {}) {
   const P = plantillas || merge();
   const tpl = P.eventos[key];
   if (!tpl || tpl.activo === false) return null;
-  const v = { nombre: "Juez del Tiempo", ...vars };
+  const v = { nombre: "Veredicto", ...vars };
   const acciones = [];
   for (const a of tpl.acciones || []) {
     let x = null;

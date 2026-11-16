@@ -68,6 +68,7 @@ export function parseICS(text, defTz) {
     else if (p.name === "RECURRENCE-ID") cur.recurrenceId = parseDate(p.value, p.params, defTz)?.ms;
     else if (p.name === "STATUS") cur.status = p.value.toUpperCase();
     else if (p.name === "TRANSP") cur.transp = p.value.toUpperCase();
+    else if (p.name === "LAST-MODIFIED") cur.modified = parseDate(p.value, p.params, defTz)?.ms;
   }
   return events;
 }
@@ -134,25 +135,25 @@ export function expand(events, from, to, defTz) {
       if (o) continue; // se agrega abajo como evento propio
       const end = t + Math.max(dur, 0);
       if (end <= from || t >= to) continue;
-      out.push({ uid: e.uid || `${e.title}-${t}`, starts_at: t, ends_at: end || t + 30 * 60e3, title: e.title || "(sin título)", all_day: !!e.start.allDay });
+      out.push({ uid: e.uid || `${e.title}-${t}`, starts_at: t, ends_at: end || t + 30 * 60e3, title: e.title || "(sin título)", all_day: !!e.start.allDay, recurrente: !!e.rrule, modificado: e.modified || null });
     }
   }
   for (const o of overrides.values()) {
     if (o.status === "CANCELLED") continue;
     const dur = o.end ? o.end.ms - o.start.ms : o.duration || 0;
     if (o.start.ms + dur <= from || o.start.ms >= to) continue;
-    out.push({ uid: o.uid, starts_at: o.start.ms, ends_at: o.start.ms + dur, title: o.title || "(sin título)", all_day: !!o.start.allDay });
+    out.push({ uid: o.uid, starts_at: o.start.ms, ends_at: o.start.ms + dur, title: o.title || "(sin título)", all_day: !!o.start.allDay, recurrente: true, modificado: o.modified || null });
   }
   return out;
 }
 
 export async function refreshCalendars(pool, tz, { fetcher = fetch, now = Date.now() } = {}) {
-  const cals = (await pool.query("SELECT * FROM calendars")).rows;
+  const cals = (await pool.query("SELECT * FROM calendars WHERE cuenta_id IS NULL AND url IS NOT NULL")).rows;
   const from = now - DAY, to = now + 14 * DAY;
   for (const c of cals) {
     try {
       const url = c.url.replace(/^webcal:/i, "https:");
-      const r = await fetcher(url, { signal: AbortSignal.timeout(20_000), headers: { "User-Agent": "juez-del-tiempo" } });
+      const r = await fetcher(url, { signal: AbortSignal.timeout(20_000), headers: { "User-Agent": "veredicto" } });
       if (!r.ok) throw new Error(`el calendario respondió ${r.status}`);
       const text = await r.text();
       if (!text.includes("BEGIN:VCALENDAR")) throw new Error("el enlace no es un calendario iCal");
@@ -163,7 +164,7 @@ export async function refreshCalendars(pool, tz, { fetcher = fetch, now = Date.n
         await client.query("DELETE FROM calendar_events WHERE calendar_id=$1", [c.id]);
         for (const e of evs)
           await client.query(
-            "INSERT INTO calendar_events VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING",
+            "INSERT INTO calendar_events(calendar_id,uid,starts_at,ends_at,title,all_day) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING",
             [c.id, e.uid.slice(0, 500), new Date(e.starts_at), new Date(e.ends_at), e.title.slice(0, 300), e.all_day],
           );
         await client.query("UPDATE calendars SET last_ok_at=now(), last_error='' WHERE id=$1", [c.id]);
@@ -176,16 +177,16 @@ export async function refreshCalendars(pool, tz, { fetcher = fetch, now = Date.n
 }
 
 // Feed propio: tu agenda y lo medido, para suscribirlo en Google/Apple/Outlook.
-export function buildICS({ blocks, sessions, name = "Juez del Tiempo" }) {
+export function buildICS({ blocks, sessions, name = "Veredicto" }) {
   const esc = (s) => String(s).replace(/[\\;,]/g, (c) => "\\" + c).replace(/\n/g, "\\n");
   const dt = (ms) => new Date(ms).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
   const fold = (l) => { const out = []; while (l.length > 74) { out.push(l.slice(0, 74)); l = " " + l.slice(74); } out.push(l); return out.join("\r\n"); };
-  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Juez del Tiempo//ES", `X-WR-CALNAME:${esc(name)}`, "CALSCALE:GREGORIAN"];
+  const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Veredicto//ES", `X-WR-CALNAME:${esc(name)}`, "CALSCALE:GREGORIAN"];
   const stamp = dt(Date.now());
   for (const b of blocks)
-    lines.push("BEGIN:VEVENT", `UID:bloque-${b.id}@juez`, `DTSTAMP:${stamp}`, `DTSTART:${dt(b.starts_at)}`, `DTEND:${dt(b.ends_at)}`, fold(`SUMMARY:${esc(b.title)}`), "TRANSP:OPAQUE", "END:VEVENT");
+    lines.push("BEGIN:VEVENT", `UID:bloque-${b.id}@veredicto`, `DTSTAMP:${stamp}`, `DTSTART:${dt(b.starts_at)}`, `DTEND:${dt(b.ends_at)}`, fold(`SUMMARY:${esc(b.title)}`), "TRANSP:OPAQUE", "END:VEVENT");
   for (const s of sessions)
-    lines.push("BEGIN:VEVENT", `UID:sesion-${s.id}@juez`, `DTSTAMP:${stamp}`, `DTSTART:${dt(s.started_at)}`, `DTEND:${dt(s.ended_at)}`, fold(`SUMMARY:✓ ${esc(s.title)}`), "TRANSP:TRANSPARENT", "END:VEVENT");
+    lines.push("BEGIN:VEVENT", `UID:sesion-${s.id}@veredicto`, `DTSTAMP:${stamp}`, `DTSTART:${dt(s.started_at)}`, `DTEND:${dt(s.ended_at)}`, fold(`SUMMARY:✓ ${esc(s.title)}`), "TRANSP:TRANSPARENT", "END:VEVENT");
   lines.push("END:VCALENDAR");
   return lines.join("\r\n") + "\r\n";
 }

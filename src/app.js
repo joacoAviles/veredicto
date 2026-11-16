@@ -10,7 +10,12 @@ import * as auth from "./auth.js";
 import { buildState, currentSession, agendaRange } from "./estado.js";
 import { bus, changed, armarHoy } from "./servicios.js";
 import { refreshCalendars, buildICS } from "./conectores/ical.js";
-import { setupNotion, pushPending } from "./conectores/notion.js";
+import { cifrar } from "./cifrado.js";
+import { sincronizar, CALENDARIO, cuentaConfig } from "./sync/motor.js";
+import { authUrl, exchange, redirectUri } from "./sync/oauth.js";
+import * as caldavA from "./sync/caldav.js";
+import * as markdownA from "./sync/markdown.js";
+import * as notionA from "./sync/notion.js";
 import { enviar } from "./conectores/avisos.js";
 import { DEFAULTS, vigilar, construirAviso, entregar } from "./vigilante.js";
 import { EVENTOS, ACCIONES, VARIABLES, merge, equipo, sanitize as sanitizePlantillas } from "./plantillas.js";
@@ -24,9 +29,10 @@ export function createApp(pool, opts = {}) {
   const cfg = {
     tz: opts.tz || "America/Santiago",
     publicUrl: opts.publicUrl || "",
-    nombre: opts.nombre || "Juez del Tiempo",
+    nombre: opts.nombre || "Veredicto",
     theme: opts.theme || "neutro",
     themeDir: opts.themeDir || "",
+    notasDir: opts.notasDir || "/datos/notas",
     secureCookie: opts.secureCookie ?? /^https:/.test(opts.publicUrl || ""),
     fetcher: opts.fetcher || fetch,
     send: opts.send || enviar,
@@ -136,7 +142,7 @@ export function createApp(pool, opts = {}) {
       if (!item) throw new core.HttpError(404, "No encontré esa tarea.");
       const s = (await q.query("INSERT INTO sessions(item_id,title,state,started_at,ended_at,source) VALUES ($1,$2,'done',$3,$4,'manual') RETURNING id", [item.id, item.title, a, b])).rows[0];
       await q.query("INSERT INTO segments(session_id,started_at,ended_at) VALUES ($1,$2,$3)", [s.id, a, b]);
-      await core.enqueue(q, "session", s.id);
+      await core.enqueue(q, "sesion_cal", s.id);
     });
     await done(res);
   }));
@@ -164,7 +170,6 @@ export function createApp(pool, opts = {}) {
     const status = req.body.status === "procesada" ? "procesada" : "abierta";
     await tx(pool, async (q) => {
       await q.query("UPDATE captures SET status=$2, updated_at=now() WHERE id=$1", [req.params.id, status]);
-      await core.enqueue(q, "capture", req.params.id);
     });
     await done(res);
   }));
@@ -174,7 +179,6 @@ export function createApp(pool, opts = {}) {
       if (!c) throw new core.HttpError(404, "No existe.");
       await core.createItem(q, { title: c.text });
       await q.query("UPDATE captures SET status='procesada', updated_at=now() WHERE id=$1", [c.id]);
-      await core.enqueue(q, "capture", c.id);
     });
     await done(res);
   }));
@@ -191,7 +195,26 @@ export function createApp(pool, opts = {}) {
     await tx(pool, (q) => core.addBlock(q, { itemId: req.body.item_id || null, title: req.body.title, starts_at: req.body.inicio, ends_at: req.body.fin }));
     await done(res);
   }));
-  app.delete("/api/bloques/:id", need, wrap(async (req, res) => { await pool.query("DELETE FROM blocks WHERE id=$1", [req.params.id]); await done(res); }));
+  app.patch("/api/bloques/:id", need, wrap(async (req, res) => {
+    await tx(pool, (q) => core.updateBlock(q, req.params.id, { title: req.body.title, starts_at: req.body.inicio, ends_at: req.body.fin }));
+    await done(res);
+    syncPronto();
+  }));
+  app.delete("/api/bloques/:id", need, wrap(async (req, res) => {
+    await tx(pool, (q) => core.updateBlock(q, req.params.id, { borrar: true }));
+    await done(res);
+    syncPronto();
+  }));
+  app.patch("/api/eventos", need, wrap(async (req, res) => {
+    await tx(pool, (q) => core.updateEvento(q, req.body.calendar_id, req.body.uid, { title: req.body.title, starts_at: req.body.inicio, ends_at: req.body.fin }));
+    await done(res);
+    syncPronto();
+  }));
+  app.get("/api/agenda", need, wrap(async (req, res) => {
+    const dias = Math.min(14, Math.max(1, Number(req.query.dias) || 7));
+    const desde = req.query.desde ? Number(req.query.desde) : startOfDay(Date.now(), cfg.tz);
+    res.json(await agendaRange(pool, desde, addDays(desde, dias, cfg.tz)));
+  }));
   app.get("/api/armar", need, wrap(async (req, res) => res.json(await armarHoy(pool, cfg.tz))));
   app.post("/api/armar", need, wrap(async (req, res) => { const r = await armarHoy(pool, cfg.tz, { aplicar: true }); await done(res, r); }));
   app.get("/api/registro", need, wrap(async (req, res) => {
@@ -213,7 +236,11 @@ export function createApp(pool, opts = {}) {
     await done(res);
   }));
   app.delete("/api/calendarios/:id", need, wrap(async (req, res) => { await pool.query("DELETE FROM calendars WHERE id=$1", [req.params.id]); await done(res); }));
-  app.post("/api/calendarios/refrescar", need, wrap(async (req, res) => { await refreshCalendars(pool, cfg.tz, { fetcher: cfg.fetcher }); await done(res); }));
+  app.post("/api/calendarios/refrescar", need, wrap(async (req, res) => {
+    await refreshCalendars(pool, cfg.tz, { fetcher: cfg.fetcher });
+    const r = await sincronizar(pool, syncOpts());
+    await done(res, { sync: r });
+  }));
   app.get("/api/feed", need, wrap(async (req, res) => {
     let s = await getSetting(pool, "feed_secreto");
     if (!s || req.query.nuevo) { s = randomBytes(18).toString("base64url"); await setSetting(pool, "feed_secreto", s); }
@@ -232,21 +259,173 @@ export function createApp(pool, opts = {}) {
     }));
   }));
 
-  // ---------- Conexiones: Notion ----------
-  app.post("/api/notion", need, wrap(async (req, res) => {
-    await setupNotion(pool, { token: String(req.body.token || "").trim(), pagina: req.body.pagina }, { client: cfg.notionClient });
-    pushPending(pool, { client: cfg.notionClient }).then(changed, () => {});
+  // ---------- Cuentas conectadas (sincronización en ambos sentidos) ----------
+  const syncOpts = () => ({ tz: cfg.tz, fetcher: cfg.fetcher, notionClient: cfg.notionClient });
+  let pronto = null;
+  const syncPronto = () => { clearTimeout(pronto); pronto = setTimeout(() => sincronizar(pool, syncOpts()).then(() => changed("sync"), () => {}), 1500); };
+  const NOMBRES = { plan: "Veredicto · Plan", registrado: "Veredicto · Registrado" };
+
+  async function guardarCalendarios(cuentaId, lista) {
+    for (const c of lista)
+      await pool.query(
+        `INSERT INTO calendars(name, cuenta_id, remote_id, color, editable, rol) VALUES ($1,$2,$3,$4,$5,'leer')
+         ON CONFLICT (cuenta_id, remote_id) WHERE cuenta_id IS NOT NULL DO UPDATE SET name=$1, color=$4, editable=$5`,
+        [String(c.nombre).slice(0, 120), cuentaId, c.remote_id, c.color, !!c.editable],
+      );
+  }
+  async function nuevaCuenta(tipo, nombre, config, activa = true) {
+    return (await pool.query("INSERT INTO cuentas(tipo,nombre,config,activa) VALUES ($1,$2,$3,$4) RETURNING id", [tipo, String(nombre).slice(0, 80), cifrar(config), activa])).rows[0].id;
+  }
+
+  app.get("/api/cuentas", need, wrap(async (req, res) => {
+    const cuentas = (await pool.query("SELECT id,tipo,nombre,activa,ultimo_ok,ultimo_error,error_desde,creada FROM cuentas ORDER BY creada")).rows;
+    const cals = (await pool.query("SELECT id,name,cuenta_id,remote_id,rol,color,editable,last_ok_at,last_error FROM calendars ORDER BY name")).rows;
+    const notas = (await pool.query("SELECT cuenta_id, count(*)::int n, sum(abiertas)::int abiertas FROM notas_estado GROUP BY cuenta_id")).rows;
+    res.json({
+      cuentas: cuentas.map((c) => ({ ...c, calendarios: cals.filter((x) => x.cuenta_id === c.id), notas: notas.find((n) => n.cuenta_id === c.id) || { n: 0, abiertas: 0 } })),
+      ical: cals.filter((x) => !x.cuenta_id),
+      bandeja: (await getSetting(pool, "bandeja_cuenta")) || null,
+      redirect: { google: cfg.publicUrl ? redirectUri(cfg.publicUrl, "google") : null, outlook: cfg.publicUrl ? redirectUri(cfg.publicUrl, "outlook") : null },
+      carpeta_notas: cfg.notasDir,
+    });
+  }));
+
+  // iCloud y cualquier servidor CalDAV: usuario + contraseña de app.
+  app.post("/api/cuentas/caldav", need, wrap(async (req, res) => {
+    const conf = { url: String(req.body.url || caldavA.ICLOUD).trim(), usuario: String(req.body.usuario || "").trim(), clave: String(req.body.clave || "").replace(/\s+/g, "") };
+    if (!conf.usuario || !conf.clave) throw new core.HttpError(400, "Falta el usuario o la contraseña de app.");
+    let lista;
+    try { lista = await caldavA.listCalendars(conf, { fetcher: cfg.fetcher }); }
+    catch (e) { throw new core.HttpError(400, e.status === 401 ? "Usuario o contraseña de app incorrectos. En iCloud usa una contraseña de app, no la de tu Apple ID." : `No pude conectar: ${e.message}`); }
+    conf.home = lista.home;
+    const id = await nuevaCuenta("caldav", req.body.nombre || (/icloud/.test(conf.url) ? "iCloud" : "CalDAV"), conf);
+    await guardarCalendarios(id, lista.calendarios);
+    await done(res, { cuenta: id });
+    syncPronto();
+  }));
+
+  // Google y Outlook: tu propio cliente OAuth. Paso 1: guardar cliente y pedir permiso.
+  app.post("/api/cuentas/:tipo(google|outlook)/oauth", need, wrap(async (req, res) => {
+    if (!cfg.publicUrl) throw new core.HttpError(400, "Define URL_PUBLICA en .env: el permiso vuelve a esa dirección.");
+    const client_id = String(req.body.client_id || "").trim(), client_secret = String(req.body.client_secret || "").trim();
+    if (!client_id || !client_secret) throw new core.HttpError(400, "Faltan el ID y el secreto del cliente.");
+    const tipo = req.params.tipo;
+    const id = await nuevaCuenta(tipo, tipo === "google" ? "Google" : "Outlook", { client_id, client_secret }, false);
+    const state = auth.signAction(await auth.secret(pool), "oauth", { cuenta: id }, 30 * 60_000);
+    res.json({ url: authUrl(tipo, { client_id, redirect: redirectUri(cfg.publicUrl, tipo), state }) });
+  }));
+  // Paso 2: el proveedor vuelve aquí con el código.
+  app.get("/oauth/:tipo(google|outlook)", wrap(async (req, res) => {
+    const volver = (msg) => res.redirect(303, `/#ajustes?${new URLSearchParams({ aviso: msg })}`);
+    if (req.query.error) return volver(`El proveedor dijo: ${req.query.error}`);
+    const d = auth.verifyAction(await auth.secret(pool), req.query.state);
+    if (!d || d.a !== "oauth") return volver("El permiso venció. Vuelve a intentarlo.");
+    const cuenta = (await pool.query("SELECT * FROM cuentas WHERE id=$1", [d.p.cuenta])).rows[0];
+    if (!cuenta) return volver("Esa conexión ya no existe.");
+    try {
+      const { cfg: c } = await cuentaConfig(pool, cuenta);
+      const tok = await exchange(req.params.tipo, { ...c, code: String(req.query.code || ""), redirect: redirectUri(cfg.publicUrl, req.params.tipo) }, cfg.fetcher);
+      const conf = { ...c, ...tok };
+      const lista = await CALENDARIO[req.params.tipo].listCalendars(conf, { fetcher: cfg.fetcher });
+      await pool.query("UPDATE cuentas SET config=$2, activa=true WHERE id=$1", [cuenta.id, cifrar(conf)]);
+      await guardarCalendarios(cuenta.id, lista.calendarios);
+      changed();
+      syncPronto();
+      volver(`${cuenta.nombre} conectado: ${lista.calendarios.length} calendarios.`);
+    } catch (e) {
+      volver(`No se pudo conectar: ${e.message}`);
+    }
+  }));
+
+  app.post("/api/cuentas/markdown", need, wrap(async (req, res) => {
+    const conf = { carpeta: path.resolve(String(req.body.carpeta || cfg.notasDir).trim()) };
+    try { await markdownA.verificar(conf); } catch (e) { throw new core.HttpError(400, e.message); }
+    const id = await nuevaCuenta("markdown", req.body.nombre || "Notas", conf);
+    if (!(await getSetting(pool, "bandeja_cuenta"))) await setSetting(pool, "bandeja_cuenta", id);
+    await done(res, { cuenta: id });
+    syncPronto();
+  }));
+  app.post("/api/cuentas/notion", need, wrap(async (req, res) => {
+    const conf = { token: String(req.body.token || "").trim(), raiz: String(req.body.pagina || "").trim() };
+    if (!conf.token) throw new core.HttpError(400, "Falta el token de la integración.");
+    try { conf.raiz = await notionA.verificar(conf, cfg.notionClient || notionA.cliente(conf)); } catch (e) { throw new core.HttpError(400, e.message); }
+    const id = await nuevaCuenta("notion", "Notion", conf);
+    if (!(await getSetting(pool, "bandeja_cuenta"))) await setSetting(pool, "bandeja_cuenta", id);
+    await done(res, { cuenta: id });
+    syncPronto();
+  }));
+  app.delete("/api/cuentas/:id", need, wrap(async (req, res) => {
+    await pool.query("UPDATE items SET status='archivada' WHERE cuenta_id=$1", [req.params.id]);
+    await pool.query("UPDATE blocks SET calendar_id=NULL, remote_uid=NULL, href=NULL, etag=NULL WHERE calendar_id IN (SELECT id FROM calendars WHERE cuenta_id=$1)", [req.params.id]);
+    await pool.query("DELETE FROM cuentas WHERE id=$1", [req.params.id]);
+    if ((await getSetting(pool, "bandeja_cuenta")) === req.params.id) await pool.query("DELETE FROM settings WHERE key='bandeja_cuenta'");
     await done(res);
   }));
-  app.delete("/api/notion", need, wrap(async (req, res) => {
-    await pool.query("DELETE FROM settings WHERE key='notion'");
-    await pool.query("DELETE FROM outbox WHERE status <> 'ok'");
+  // Qué hace cada calendario: leer, plan (tus bloques), registrado (lo medido) u oculto.
+  app.patch("/api/calendarios/:id", need, wrap(async (req, res) => {
+    const rol = req.body.rol;
+    if (!["leer", "plan", "registrado", "oculto"].includes(rol)) throw new core.HttpError(400, "Rol no válido.");
+    const c = (await pool.query("SELECT * FROM calendars WHERE id=$1", [req.params.id])).rows[0];
+    if (!c?.cuenta_id && rol !== "leer" && rol !== "oculto") throw new core.HttpError(400, "Un enlace iCal es solo de lectura.");
+    if ((rol === "plan" || rol === "registrado") && !c.editable) throw new core.HttpError(400, "No tienes permiso de escritura en ese calendario.");
+    await tx(pool, async (q) => {
+      if (rol === "plan" || rol === "registrado") await q.query("UPDATE calendars SET rol='leer' WHERE rol=$1", [rol]);
+      await q.query("UPDATE calendars SET rol=$2 WHERE id=$1", [c.id, rol]);
+      if (rol === "plan") {
+        await q.query("DELETE FROM calendar_events WHERE calendar_id=$1", [c.id]);
+        for (const b of (await q.query("SELECT id FROM blocks WHERE borrado IS NULL AND remote_uid IS NULL AND ends_at > now()")).rows) await core.enqueue(q, "bloque", b.id);
+      }
+    });
     await done(res);
+    syncPronto();
   }));
-  app.post("/api/notion/reintentar", need, wrap(async (req, res) => {
-    await pool.query("UPDATE outbox SET next_at=now() WHERE status='error'");
-    const r = await pushPending(pool, { client: cfg.notionClient });
-    await done(res, { notion: r });
+  // Crea «Veredicto · Plan» o «Veredicto · Registrado» en la cuenta que elijas.
+  app.post("/api/cuentas/:id/crear-calendario", need, wrap(async (req, res) => {
+    const rol = req.body.rol === "registrado" ? "registrado" : "plan";
+    const cuenta = (await pool.query("SELECT * FROM cuentas WHERE id=$1", [req.params.id])).rows[0];
+    if (!cuenta || !CALENDARIO[cuenta.tipo]) throw new core.HttpError(400, "Esa cuenta no tiene calendarios.");
+    const { cfg: c, guardar } = await cuentaConfig(pool, cuenta);
+    let remoteId;
+    try { remoteId = await CALENDARIO[cuenta.tipo].createCalendar(c, NOMBRES[rol], { fetcher: cfg.fetcher, tz: cfg.tz, onConfig: guardar }); }
+    catch (e) { throw new core.HttpError(400, e.message); }
+    const cal = (await pool.query(
+      `INSERT INTO calendars(name,cuenta_id,remote_id,editable,rol) VALUES ($1,$2,$3,true,'leer')
+       ON CONFLICT (cuenta_id, remote_id) WHERE cuenta_id IS NOT NULL DO UPDATE SET name=$1 RETURNING id`, [NOMBRES[rol], cuenta.id, remoteId])).rows[0];
+    req.params.id = cal.id;
+    req.body.rol = rol;
+    await tx(pool, async (q) => {
+      await q.query("UPDATE calendars SET rol='leer' WHERE rol=$1", [rol]);
+      await q.query("UPDATE calendars SET rol=$2 WHERE id=$1", [cal.id, rol]);
+      if (rol === "plan") for (const b of (await q.query("SELECT id FROM blocks WHERE borrado IS NULL AND remote_uid IS NULL AND ends_at > now()")).rows) await core.enqueue(q, "bloque", b.id);
+    });
+    await done(res);
+    syncPronto();
+  }));
+  app.put("/api/bandeja-destino", need, wrap(async (req, res) => {
+    if (req.body.cuenta_id) await setSetting(pool, "bandeja_cuenta", req.body.cuenta_id);
+    else await pool.query("DELETE FROM settings WHERE key='bandeja_cuenta'");
+    res.json({ ok: true });
+  }));
+  app.post("/api/sincronizar", need, wrap(async (req, res) => {
+    await refreshCalendars(pool, cfg.tz, { fetcher: cfg.fetcher });
+    const r = await sincronizar(pool, syncOpts());
+    await done(res, { sync: r });
+  }));
+  app.get("/api/conflictos", need, wrap(async (req, res) => {
+    res.json((await pool.query("SELECT * FROM conflictos ORDER BY creado DESC LIMIT 100")).rows);
+  }));
+  app.post("/api/conflictos/:id/:accion(revisado|deshacer)", need, wrap(async (req, res) => {
+    const c = (await pool.query("SELECT * FROM conflictos WHERE id=$1", [req.params.id])).rows[0];
+    if (!c) throw new core.HttpError(404, "No existe.");
+    if (req.params.accion === "deshacer" && !c.perdedor.borrado_afuera) {
+      const p = c.perdedor;
+      await tx(pool, (q) => (c.objeto === "bloque"
+        ? core.updateBlock(q, c.ref, { title: p.title, starts_at: p.start, ends_at: p.end })
+        : q.query("SELECT calendar_id FROM calendar_events WHERE uid=$1 LIMIT 1", [c.ref]).then((r) => r.rows[0] && core.updateEvento(q, r.rows[0].calendar_id, c.ref, { title: p.title, starts_at: p.start, ends_at: p.end }))));
+      syncPronto();
+    }
+    await pool.query("UPDATE conflictos SET revisado=true WHERE id=$1", [c.id]);
+    await done(res);
   }));
 
   // ---------- Conexiones: avisos ----------
@@ -261,7 +440,7 @@ export function createApp(pool, opts = {}) {
         telegram: c.telegram ? { chat: c.telegram.chat, token: c.telegram.token ? "••••" : "" } : null,
         webhook: c.webhook ? { url: c.webhook.url } : null,
       },
-      sugerido_ntfy: "juez-" + randomBytes(9).toString("hex"),
+      sugerido_ntfy: "veredicto-" + randomBytes(9).toString("hex"),
       vigilante: await getSetting(pool, "vigilante", {}),
       tokens: (await pool.query("SELECT count(*)::int n FROM api_tokens")).rows[0].n,
     });
@@ -294,7 +473,7 @@ export function createApp(pool, opts = {}) {
   app.post("/api/avisos/probar", need, wrap(async (req, res) => {
     const a = await getSetting(pool, "avisos", {});
     const r = await cfg.send(a.canales || {}, {
-      titulo: "Juez del Tiempo conectado", mensaje: "Así te voy a reclamar cuando no registres nada.", prioridad: 3,
+      titulo: `${cfg.nombre} conectado`, mensaje: "Así te voy a reclamar cuando no registres nada.", prioridad: 3,
       abrir: cfg.publicUrl || undefined, acciones: [],
     }, { fetcher: cfg.fetcher });
     if (!r.length) throw new core.HttpError(400, "No hay ningún canal configurado.");

@@ -9,14 +9,14 @@ const cfg = { activo: true, desde: "00:00", hasta: "23:59", niveles: [10, 30, 60
 const base = { now, tz: "UTC", cfg, st: {}, current: null, ahora: null, proximo: null, sugeridas: [], idleSince: now };
 
 test("capas: fábrica < equipo < tuyas", () => {
-  const equipo = { global: { prefijo: "JOACO · " }, eventos: { inactivo1: { titulo: "Oye, {sin_registrar} en blanco", tags: "eyes" } } };
+  const equipo = { global: { prefijo: "EQUIPO · " }, eventos: { inactivo1: { titulo: "Oye, {sin_registrar} en blanco", tags: "eyes" } } };
   const tuyas = { eventos: { inactivo1: { tags: "fire" } } };
   const P = merge(equipo, tuyas);
   assert.equal(P.eventos.inactivo1.titulo, "Oye, {sin_registrar} en blanco");
   assert.equal(P.eventos.inactivo1.tags, "fire");
   assert.equal(P.eventos.agendado.titulo, "Agendado: {titulo}");
   const r = decide({ ...base, plantillas: P, idleSince: now - 11 * 60000, sugeridas: [{ item_id: "1", title: "Leer" }] });
-  assert.equal(r.aviso.titulo, "JOACO · Oye, 11 min en blanco");
+  assert.equal(r.aviso.titulo, "EQUIPO · Oye, 11 min en blanco");
   assert.equal(r.aviso.tags, "fire");
 });
 

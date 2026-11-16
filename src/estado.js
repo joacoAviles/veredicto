@@ -28,21 +28,24 @@ export async function currentSession(q) {
 
 export async function agendaRange(q, from, to) {
   const [blocks, events] = await Promise.all([
-    q.query("SELECT * FROM blocks WHERE starts_at < $2 AND ends_at > $1 ORDER BY starts_at", [new Date(from), new Date(to)]),
+    q.query("SELECT b.*, c.name AS calendario FROM blocks b LEFT JOIN calendars c ON c.id=b.calendar_id WHERE b.borrado IS NULL AND b.starts_at < $2 AND b.ends_at > $1 ORDER BY b.starts_at", [new Date(from), new Date(to)]),
     q.query(
-      `SELECT e.*, c.name AS calendario FROM calendar_events e JOIN calendars c ON c.id=e.calendar_id
-       WHERE e.starts_at < $2 AND e.ends_at > $1 ORDER BY e.starts_at`, [new Date(from), new Date(to)]),
+      `SELECT e.*, c.name AS calendario, c.color, c.editable, c.cuenta_id FROM calendar_events e JOIN calendars c ON c.id=e.calendar_id
+       WHERE c.rol <> 'oculto' AND e.starts_at < $2 AND e.ends_at > $1 ORDER BY e.starts_at`, [new Date(from), new Date(to)]),
   ]);
   return {
-    blocks: blocks.rows.map((b) => ({ id: b.id, item_id: b.item_id, title: b.title, start: ms(b.starts_at), end: ms(b.ends_at), origin: b.origin })),
-    events: events.rows.map((e) => ({ uid: e.uid, title: e.title, start: ms(e.starts_at), end: ms(e.ends_at), all_day: e.all_day, calendario: e.calendario })),
+    blocks: blocks.rows.map((b) => ({ id: b.id, item_id: b.item_id, title: b.title, start: ms(b.starts_at), end: ms(b.ends_at), origin: b.origin, calendario: b.calendario || null, sincronizado: !!b.etag })),
+    events: events.rows.map((e) => ({
+      uid: e.uid, calendar_id: e.calendar_id, title: e.title, start: ms(e.starts_at), end: ms(e.ends_at), all_day: e.all_day, calendario: e.calendario, color: e.color,
+      editable: !!(e.cuenta_id && e.editable && e.href && !e.recurrente), recurrente: e.recurrente, pendiente: !!e.local_editado,
+    })),
   };
 }
 
 export async function buildState(q, { tz, now = Date.now() }) {
   const day = startOfDay(now, tz), tomorrow = addDays(day, 1, tz);
   const pred = await getPrediccion(q);
-  const [items, current, agenda, done, captures, outbox, cals, notion, avisos, hab] = await Promise.all([
+  const [items, current, agenda, done, captures, outbox, cals, cuentas, avisos, hab, conflictos] = await Promise.all([
     q.query("SELECT * FROM items WHERE status <> 'archivada' ORDER BY kind, (status='hecha'), (status='en curso') DESC, due_date NULLS LAST, created_at DESC LIMIT 500"),
     currentSession(q),
     agendaRange(q, day, tomorrow),
@@ -51,11 +54,12 @@ export async function buildState(q, { tz, now = Date.now() }) {
        FROM sessions s JOIN segments g ON g.session_id=s.id
        WHERE g.started_at < $2 AND COALESCE(g.ended_at, now()) > $1 ORDER BY g.started_at`, [new Date(day), new Date(tomorrow)]),
     q.query("SELECT * FROM captures WHERE status='abierta' OR kind='nota' ORDER BY created_at DESC LIMIT 200"),
-    q.query("SELECT status, count(*)::int AS n, max(last_error) FILTER (WHERE status='error') AS err FROM outbox WHERE status <> 'ok' OR done_at > now() - interval '1 day' GROUP BY status"),
-    q.query("SELECT id, name, last_ok_at, last_error FROM calendars ORDER BY created_at"),
-    getSetting(q, "notion"),
+    q.query("SELECT status, count(*)::int AS n, max(last_error) FILTER (WHERE status='error') AS err FROM outbox WHERE status <> 'ok' GROUP BY status"),
+    q.query("SELECT id, name, last_ok_at, last_error, cuenta_id, rol, color, editable FROM calendars ORDER BY created_at"),
+    q.query("SELECT id, tipo, nombre, activa, ultimo_ok, ultimo_error, error_desde FROM cuentas ORDER BY creada"),
     getSetting(q, "avisos"),
     habitosConModo(q, now, tz, pred),
+    q.query("SELECT count(*)::int n FROM conflictos WHERE NOT revisado"),
   ]);
   const rutinas = items.rows.filter((i) => i.kind === "rutina" && i.status !== "archivada");
   const medido = done.rows.reduce((a, g) => a + Math.max(0, Math.min(ms(g.ended_at) || now, tomorrow) - Math.max(ms(g.started_at), day)), 0);
@@ -66,19 +70,22 @@ export async function buildState(q, { tz, now = Date.now() }) {
     items: items.rows.map((i) => ({
       id: i.id, kind: i.kind, title: i.title, status: i.status, est_min: i.est_min,
       due_date: i.due_date ? new Date(i.due_date).toISOString().slice(0, 10) : null,
-      hora: i.hora ? String(i.hora).slice(0, 5) : null, dias: i.dias, en_notion: !!i.notion_id,
+      hora: i.hora ? String(i.hora).slice(0, 5) : null, dias: i.dias,
+      fuente: i.fuente, nota: i.nota_titulo || null, nota_ref: i.nota_ref || null,
     })),
     agenda,
     hoy: {
       medido_ms: medido,
       tramos: done.rows.map((g) => ({ session_id: g.id, item_id: g.item_id, title: g.title, start: ms(g.started_at), end: ms(g.ended_at), source: g.source })),
     },
-    captures: captures.rows.map((c) => ({ id: c.id, kind: c.kind, text: c.text, body: c.body, source: c.source, status: c.status, at: ms(c.created_at), en_notion: !!c.notion_id })),
+    captures: captures.rows.map((c) => ({ id: c.id, kind: c.kind, text: c.text, body: c.body, source: c.source, status: c.status, at: ms(c.created_at) })),
     sugerencias: sugerencias(paraSugerir(hab), rutinasPermitidas(rutinas.map((r) => ({ ...r, hora: r.hora ? String(r.hora).slice(0, 5) : null })), pred, "sugerir"), now, tz, 3, pred.radio),
     habitos: hab,
     conexiones: {
-      notion: notion?.token ? { ok: true, pendientes: (ob.pendiente?.n || 0) + (ob.error?.n || 0), error: ob.error?.err || "" } : { ok: false },
-      calendarios: cals.rows.map((c) => ({ id: c.id, name: c.name, ok: !!c.last_ok_at && !c.last_error, last_ok_at: ms(c.last_ok_at), error: c.last_error })),
+      cuentas: cuentas.rows.map((c) => ({ id: c.id, tipo: c.tipo, nombre: c.nombre, activa: c.activa, ok: !!c.ultimo_ok && !c.ultimo_error, ultimo_ok: ms(c.ultimo_ok), error: c.ultimo_error, error_desde: ms(c.error_desde) })),
+      calendarios: cals.rows.map((c) => ({ id: c.id, name: c.name, cuenta_id: c.cuenta_id, rol: c.rol, color: c.color, editable: c.editable, ok: !!c.last_ok_at && !c.last_error, last_ok_at: ms(c.last_ok_at), error: c.last_error })),
+      cola: { pendientes: (ob.pendiente?.n || 0) + (ob.error?.n || 0), error: ob.error?.err || "" },
+      conflictos: conflictos.rows[0].n,
       avisos: {
         ntfy: !!avisos?.canales?.ntfy?.topic, telegram: !!avisos?.canales?.telegram?.chat, webhook: !!avisos?.canales?.webhook?.url,
         activo: avisos?.activo !== false,

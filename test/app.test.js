@@ -5,7 +5,7 @@ import { createPool, migrate, getSetting, setSetting } from "../src/db.js";
 import { createApp } from "../src/app.js";
 import { setupCode } from "../src/auth.js";
 import { vigilar, decide } from "../src/vigilante.js";
-import { pushPending } from "../src/conectores/notion.js";
+import { setClave } from "../src/cifrado.js";
 
 const URL = process.env.TEST_DATABASE_URL;
 if (!URL) { test("sin TEST_DATABASE_URL", { skip: true }, () => {}); }
@@ -33,10 +33,11 @@ const call = async (path, { method = "GET", body, auth = "cookie", text } = {}) 
 
 before(async () => {
   if (!URL) return;
+  setClave("prueba");
   pool = createPool(URL);
   await pool.query("DROP SCHEMA public CASCADE; CREATE SCHEMA public;");
   await migrate(pool);
-  const app = createApp(pool, { tz: "America/Santiago", publicUrl: "https://juez.ejemplo.cl", send: fakeSend, fetcher: fakeFetch });
+  const app = createApp(pool, { tz: "America/Santiago", publicUrl: "https://veredicto.ejemplo.cl", send: fakeSend, fetcher: fakeFetch });
   server = app.listen(0);
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -74,7 +75,7 @@ test("temporizador: una sola actividad abierta, toques cortos se descartan", { s
   r = await call("/api/parar", { method: "POST" });
   assert.equal(r.body.estado.current, null);
   assert.ok(r.body.estado.hoy.medido_ms >= 19 * 60000);
-  assert.equal((await pool.query("SELECT count(*)::int n FROM outbox WHERE kind='session'")).rows[0].n, 1);
+  assert.equal((await pool.query("SELECT count(*)::int n FROM outbox WHERE kind='sesion_cal'")).rows[0].n, 1);
 });
 
 test("dos pedidos simultáneos no dejan dos actividades abiertas", { skip: !URL }, async () => {
@@ -113,22 +114,22 @@ test("calendario iCal: el evento aparece en la agenda", { skip: !URL }, async ()
 test("vigilante: si hay algo agendado y no registras, avisa con botón para iniciarlo", { skip: !URL }, async () => {
   await setSetting(pool, "avisos", { activo: true, desde: "00:00", hasta: "23:59", canales: { ntfy: { topic: "x" } } });
   sent.length = 0;
-  const out = await vigilar(pool, { tz: "America/Santiago", publicUrl: "https://juez.ejemplo.cl", send: fakeSend });
+  const out = await vigilar(pool, { tz: "America/Santiago", publicUrl: "https://veredicto.ejemplo.cl", send: fakeSend });
   assert.equal(out.aviso.tipo, "agendado");
   assert.equal(sent[0].titulo, "Agendado: Reunión con cliente");
   const url = sent[0].acciones[0].url;
-  assert.ok(url.startsWith("https://juez.ejemplo.cl/a/"));
+  assert.ok(url.startsWith("https://veredicto.ejemplo.cl/a/"));
   // el mismo bloque no se repite
-  const again = await vigilar(pool, { tz: "America/Santiago", publicUrl: "https://juez.ejemplo.cl", send: fakeSend });
+  const again = await vigilar(pool, { tz: "America/Santiago", publicUrl: "https://veredicto.ejemplo.cl", send: fakeSend });
   assert.notEqual(again.aviso?.tipo, "agendado");
   // tocar el botón del aviso inicia la actividad en el servidor
-  const path = url.replace("https://juez.ejemplo.cl", "");
+  const path = url.replace("https://veredicto.ejemplo.cl", "");
   const r = await call(path, { method: "POST", auth: "none" });
   assert.equal(r.body, "▶ Reunión con cliente");
   const st = await call("/api/estado");
   assert.equal(st.body.current.title, "Reunión con cliente");
   // con algo corriendo, el vigilante calla
-  assert.equal((await vigilar(pool, { tz: "America/Santiago", publicUrl: "https://juez.ejemplo.cl", send: fakeSend })).motivo, "registrando");
+  assert.equal((await vigilar(pool, { tz: "America/Santiago", publicUrl: "https://veredicto.ejemplo.cl", send: fakeSend })).motivo, "registrando");
   // enlace alterado: rechazado
   assert.equal((await call(path.slice(0, -2) + "xx", { method: "POST", auth: "none" })).status, 410);
   await call("/api/parar", { method: "POST" });
@@ -170,38 +171,13 @@ test("armar mi día crea bloques con hábitos y no pisa el calendario", { skip: 
   assert.ok(Array.isArray(r.body.plan));
 });
 
-test("Notion: la cola se envía y reintenta sin perder nada", { skip: !URL }, async () => {
-  let calls = 0, fail = true;
-  const client = {
-    pages: {
-      retrieve: async () => ({}),
-      create: async () => { calls++; if (fail) { const e = new Error("rate"); e.status = 429; throw e; } return { id: "p" + calls }; },
-      update: async () => ({}),
-    },
-    databases: { create: async () => ({ id: "db" + Math.random() }) },
-  };
-  const { setupNotion } = await import("../src/conectores/notion.js");
-  await setupNotion(pool, { token: "secret_x", pagina: "https://www.notion.so/Pagina-0123456789abcdef0123456789abcdef" }, { client });
-  let r = await pushPending(pool, { client, pauseMs: 0 });
-  assert.ok(r.errores > 0);
-  assert.equal((await pool.query("SELECT count(*)::int n FROM outbox WHERE status='error'")).rows[0].n > 0, true);
-  fail = false;
-  await pool.query("UPDATE outbox SET next_at=now()");
-  r = await pushPending(pool, { client, pauseMs: 0, limit: 200 });
-  assert.equal(r.errores, 0);
-  assert.equal((await pool.query("SELECT count(*)::int n FROM outbox WHERE status<>'ok'")).rows[0].n, 0);
-  assert.equal((await pool.query("SELECT count(*)::int n FROM items WHERE notion_id IS NULL AND status<>'archivada'")).rows[0].n, 0);
-  const cfg = await getSetting(pool, "notion");
-  assert.equal(cfg.pagina, "0123456789abcdef0123456789abcdef");
-});
-
 test("plantilla y feed de calendario", { skip: !URL }, async () => {
   const css = await call("/theme.css", { auth: "none" });
   assert.match(css.body, /--acento/);
   const html = await call("/", { auth: "none" });
-  assert.match(html.body, /<title>Juez del Tiempo<\/title>/);
+  assert.match(html.body, /<title>Veredicto<\/title>/);
   const f = await call("/api/feed");
-  const ics = await call(f.body.url.replace("https://juez.ejemplo.cl", ""), { auth: "none" });
+  const ics = await call(f.body.url.replace("https://veredicto.ejemplo.cl", ""), { auth: "none" });
   assert.match(ics.body, /BEGIN:VCALENDAR/);
   assert.equal((await call("/cal/malo.ics", { auth: "none" })).status, 404);
 });
