@@ -8,6 +8,7 @@ import { minuteOfDay, hhmmToMin, startOfDay, addDays, atMinute, fmtHora, fmtDur 
 import { enviar } from "./conectores/avisos.js";
 import { signAction, secret } from "./auth.js";
 import { merge, fill, loadPlantillas } from "./plantillas.js";
+import { reciente } from "./sync/activitywatch.js";
 
 export const DEFAULTS = { activo: true, desde: "08:00", hasta: "23:30", niveles: [10, 30, 60], repetir: 10, canales: {} };
 
@@ -117,7 +118,8 @@ export function decide(ctx) {
   const toca = nivel > st.nivel || (nivel === max && now - st.ultimo >= repetir);
   if (!toca) return { aviso: null, st, motivo: "esperando para repetir" };
   const key = nivel >= max ? "inactivo3" : `inactivo${Math.min(nivel, 2)}`;
-  const r = emitir(key, { sin_registrar: fmtDur(now - ctx.idleSince), sugerencia: lista[0]?.title || "" }, { ...st, nivel, ultimo: now }, `nivel ${nivel}`, { nivel });
+  const pc = ctx.computador ? ` En el computador: ${ctx.computador.app}${ctx.computador.minutos >= 2 ? ` (${ctx.computador.minutos} min)` : ""}.` : "";
+  const r = emitir(key, { sin_registrar: fmtDur(now - ctx.idleSince), sugerencia: lista[0]?.title || "", computador: pc }, { ...st, nivel, ultimo: now }, `nivel ${nivel}`, { nivel });
   return r || { aviso: null, st: { ...st, nivel, ultimo: now }, motivo: `nivel ${nivel} (aviso apagado)` };
 }
 
@@ -165,6 +167,7 @@ export async function vigilar(pool, { tz, publicUrl, themeDir, now = Date.now(),
   const est = current?.item_id ? (await pool.query("SELECT est_min FROM items WHERE id=$1", [current.item_id])).rows[0]?.est_min : null;
   const ctx = {
     now, tz, cfg, st, current, plantillas, estimadoMin: est,
+    computador: await reciente(pool, now),
     idleSince: await idleSince(pool, current, now, tz, cfg),
     ahora: agendadoAhora(agenda, now),
     proximo: proximoEn(agenda, now, anticipo),

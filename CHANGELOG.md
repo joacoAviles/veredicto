@@ -1,5 +1,14 @@
 # Cambios
 
+## v3.0.0
+- **Proyectos y pilares** (como el Juez del Tiempo): tareas agrupadas, minutos medidos y de la semana, fecha límite, avance contra lo planificado y Eisenhower.
+- **Las 9 bases de Notion**: crea las «Veredicto · …» o adopta tus «TimeMachine - …» e importa su historial; se mantienen al día solas. Flujo gana la columna Proyecto. Página guía con plantillas.
+- **ActivityWatch**: lo que hiciste en el computador, sin tiempo inactivo, listo para registrar con un toque; los avisos dicen en qué app estás.
+- **MCP** en `/mcp`: Claude, Aurora u otro asistente pueden ver tu estado, iniciar/parar, capturar, crear tareas, agendar y armar tu día.
+- **Datos de ejemplo**: 3 semanas realistas que se cargan y se borran con un botón (nunca salen a tus calendarios ni a Notion).
+- **Bienvenida nueva**: asistente paso a paso (avisos, calendarios, Notion, computador, atajos y asistente) con resumen final.
+- La cookie de sesión es «Secure» solo si llegaste por https: ya no hace falta `COOKIE_SEGURA=0` para entrar por la IP local.
+
 ## v2.2.1
 - El instalador y la restauración funcionan con `docker-compose` de Synology (Container Manager) además de `docker compose`.
 

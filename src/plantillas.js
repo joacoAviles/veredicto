@@ -18,7 +18,7 @@ export const EVENTOS = {
   inactivo1: {
     nombre: "Sin registrar · primer aviso", ayuda: "Primer nivel (por defecto a los 10 min).",
     activo: true, prioridad: 3, tags: "stopwatch",
-    titulo: "¿Qué estás haciendo?", mensaje: "Llevas {sin_registrar} sin registrar.", acciones: ["sugerencia1", "sugerencia2", "silenciar60"],
+    titulo: "¿Qué estás haciendo?", mensaje: "Llevas {sin_registrar} sin registrar.{computador}", acciones: ["sugerencia1", "sugerencia2", "silenciar60"],
   },
   inactivo2: {
     nombre: "Sin registrar · segundo aviso", ayuda: "Segundo nivel (por defecto a los 30 min).",
@@ -58,6 +58,7 @@ export const VARIABLES = {
   titulo: "lo agendado o lo que corre", hora: "hora de inicio", fin: "hora de término", minutos: "minutos que faltan",
   sin_registrar: "tiempo sin registrar", sugerencia: "primera sugerencia", lleva: "tiempo que lleva", estimado: "tiempo estimado",
   agenda: "lista del día", nombre: "nombre de la app",
+  computador: "lo que ActivityWatch ve en tu computador (vacío si no hay)",
 };
 
 export const GLOBAL_DEFAULTS = { prefijo: "", icono: true };

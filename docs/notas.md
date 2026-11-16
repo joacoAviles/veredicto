@@ -67,3 +67,12 @@ Lo que capturas con Siri, Android, el reloj o la app se agrega a la nota del dí
 - Notion: una fila nueva en la base **Flujo** con estado «Bandeja».
 
 Si conectas las dos, eliges a cuál va con «Las capturas van aquí».
+
+
+## Las 9 bases del Juez del Tiempo
+Con Notion conectado, en Ajustes → Notas eliges:
+
+- **Usar mis bases del Juez:** busca tus «TimeMachine - …» (compártelas con la integración), importa pilares, proyectos, tareas, rutinas, sesiones, bloques del calendario e ideas, y desde ahí las mantiene al día.
+- **Crear las 9 bases nuevas:** crea «Veredicto · Pilares», «Proyectos», «Tareas», «Ideas e Inbox», «Rutinas y hábitos», «Recurrencias», «Calendario», «Sesiones» y «Actividad y revisiones» bajo tu página, más una página «Veredicto · Cómo usar» con plantillas (video, gestión, revisión semanal, idea).
+
+Las 9 bases se escriben desde Veredicto cada 2 minutos (máximo 60 filas por pasada) y sirven para mirar, filtrar y armar vistas. Lo que va en ambos sentidos es **Flujo**, que ahora también tiene la columna **Proyecto**: si eliges un proyecto en una fila, la tarea queda en ese proyecto. Los datos de ejemplo nunca se escriben en Notion.

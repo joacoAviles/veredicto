@@ -120,6 +120,7 @@ export function fila(page) {
     etapa: ETAPAS.includes(sel(pr[P.etapa])) ? sel(pr[P.etapa]) : "Bandeja",
     dur: Number(pr[P.dur]?.number) || null,
     agendar: ag?.start ? { start: ag.start, end: ag.end || null, conHora: ag.start.length > 10 } : null,
+    proyecto: (pr.Proyecto?.relation || [])[0]?.id || null,
     editado: page.last_edited_time,
     archivada: !!(page.archived || page.in_trash),
   };

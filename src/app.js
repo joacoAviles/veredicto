@@ -10,7 +10,7 @@ import * as auth from "./auth.js";
 import { buildState, currentSession, agendaRange } from "./estado.js";
 import { bus, changed, armarHoy } from "./servicios.js";
 import { refreshCalendars, buildICS } from "./conectores/ical.js";
-import { cifrar } from "./cifrado.js";
+import { cifrar, descifrar } from "./cifrado.js";
 import { sincronizar, empujar, CALENDARIO, cuentaConfig } from "./sync/motor.js";
 import { authUrl, exchange, redirectUri } from "./sync/oauth.js";
 import * as caldavA from "./sync/caldav.js";
@@ -21,6 +21,11 @@ import { DEFAULTS, vigilar, construirAviso, entregar } from "./vigilante.js";
 import { EVENTOS, ACCIONES, VARIABLES, merge, equipo, sanitize as sanitizePlantillas } from "./plantillas.js";
 import { getPrediccion, habitosConModo, sanitizePred, modoDe } from "./prediccion.js";
 import { fmtDur, fmtHora, isValidZone, startOfDay, addDays } from "./time.js";
+import * as proyectos from "./proyectos.js";
+import * as espejo from "./sync/espejo.js";
+import * as aw from "./sync/activitywatch.js";
+import * as demo from "./demo.js";
+import { mcpRouter } from "./mcp.js";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const exists = (p) => access(p).then(() => true, () => false);
@@ -33,7 +38,8 @@ export function createApp(pool, opts = {}) {
     theme: opts.theme || "neutro",
     themeDir: opts.themeDir || "",
     notasDir: opts.notasDir || "/datos/notas",
-    secureCookie: opts.secureCookie ?? /^https:/.test(opts.publicUrl || ""),
+    secureCookie: opts.secureCookie, // sin definir: Secure solo si la petición llegó por https (túnel o proxy)
+    version: opts.version || "",
     fetcher: opts.fetcher || fetch,
     send: opts.send || enviar,
     notionClient: opts.notionClient || null,
@@ -59,7 +65,7 @@ export function createApp(pool, opts = {}) {
     const who = await auth.identify(pool, req);
     if (!who) return res.status(401).json({ error: "Inicia sesión." });
     // Un token de atajo solo sirve para los atajos: si se filtra, no abre tus cuentas ni tus ajustes.
-    if (who.via === "token" && !req.path.startsWith("/api/atajo/")) return res.status(403).json({ error: "Este token solo sirve para atajos." });
+    if (who.via === "token" && !req.path.startsWith("/api/atajo/") && req.path !== "/mcp") return res.status(403).json({ error: "Este token solo sirve para atajos y para tu asistente (MCP)." });
     req.who = who;
     next();
   });
@@ -116,7 +122,7 @@ export function createApp(pool, opts = {}) {
     try { await auth.createAccount(pool, { password: req.body.password, codigo: req.body.codigo }); }
     catch (e) { if (e.status === 403) fallo(req.ip); throw e; }
     const token = await auth.login(pool, req.body.password, req.get("user-agent"));
-    auth.setCookie(res, token, cfg.secureCookie);
+    auth.setCookie(res, token, cfg.secureCookie ?? req.secure);
     res.json({ ok: true });
   }));
   app.post("/api/entrar", wrap(async (req, res) => {
@@ -125,7 +131,7 @@ export function createApp(pool, opts = {}) {
     const token = await auth.login(pool, req.body.password, req.get("user-agent"));
     if (!token) { fallo(req.ip); return res.status(401).json({ error: "Contraseña incorrecta." }); }
     fallos.delete(req.ip);
-    auth.setCookie(res, token, cfg.secureCookie);
+    auth.setCookie(res, token, cfg.secureCookie ?? req.secure);
     res.json({ ok: true });
   }));
   app.post("/api/salir", wrap(async (req, res) => { await auth.logout(pool, req); auth.clearCookie(res); res.json({ ok: true }); }));
@@ -146,7 +152,11 @@ export function createApp(pool, opts = {}) {
     const r = await tx(pool, async (q) => { await core.lockTimer(q); return fn(q, req); });
     await done(res, { resultado: r });
   });
-  app.post("/api/iniciar", need, timer((q, req) => core.start(q, { itemId: req.body.item_id || null, title: req.body.title || null, source: req.body.source || "app" })));
+  app.post("/api/iniciar", need, timer(async (q, req) => {
+    const r = await core.start(q, { itemId: req.body.item_id || null, title: req.body.title || null, source: req.body.source || "app" });
+    if (req.body.proyecto_id && !r.item.proyecto_id) await proyectos.asignar(q, r.item.id, req.body.proyecto_id);
+    return r;
+  }));
   app.post("/api/parar", need, timer((q) => core.stop(q)));
   app.post("/api/pausar", need, timer((q) => core.pause(q)));
   app.post("/api/seguir", need, timer((q) => core.resume(q)));
@@ -242,10 +252,10 @@ export function createApp(pool, opts = {}) {
     const dias = Math.min(60, Math.max(1, Number(req.query.dias) || 7));
     const desde = addDays(startOfDay(Date.now(), cfg.tz), -(dias - 1), cfg.tz);
     const r = await pool.query(
-      `SELECT s.id, s.title, s.source, s.started_at, s.ended_at,
+      `SELECT s.id, s.title, s.source, s.started_at, s.ended_at, i.proyecto_id,
          (SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (COALESCE(g.ended_at, now())-g.started_at))),0) FROM segments g WHERE g.session_id=s.id)*1000 AS ms
-       FROM sessions s WHERE s.started_at >= $1 ORDER BY s.started_at DESC`, [new Date(desde)]);
-    res.json(r.rows.map((x) => ({ id: x.id, title: x.title, source: x.source, start: +x.started_at, end: x.ended_at ? +x.ended_at : null, ms: Number(x.ms) })));
+       FROM sessions s LEFT JOIN items i ON i.id=s.item_id WHERE s.started_at >= $1 ORDER BY s.started_at DESC`, [new Date(desde)]);
+    res.json(r.rows.map((x) => ({ id: x.id, title: x.title, source: x.source, start: +x.started_at, end: x.ended_at ? +x.ended_at : null, ms: Number(x.ms), proyecto_id: x.proyecto_id || null })));
   }));
 
   // ---------- Conexiones: calendarios ----------
@@ -294,6 +304,7 @@ export function createApp(pool, opts = {}) {
         [String(c.nombre).slice(0, 120), cuentaId, c.remote_id, c.color, !!c.editable],
       );
   }
+  const descifrarSeguro = (x) => { try { return descifrar(x) || {}; } catch { return {}; } };
   async function nuevaCuenta(tipo, nombre, config, activa = true) {
     return (await pool.query("INSERT INTO cuentas(tipo,nombre,config,activa) VALUES ($1,$2,$3,$4) RETURNING id", [tipo, String(nombre).slice(0, 80), cifrar(config), activa])).rows[0].id;
   }
@@ -303,7 +314,15 @@ export function createApp(pool, opts = {}) {
     const cals = (await pool.query("SELECT id,name,cuenta_id,remote_id,rol,color,editable,last_ok_at,last_error FROM calendars ORDER BY name")).rows;
     const notas = (await pool.query("SELECT cuenta_id, count(*)::int n, sum(abiertas)::int abiertas FROM notas_estado GROUP BY cuenta_id")).rows;
     res.json({
-      cuentas: cuentas.map((c) => ({ ...c, calendarios: cals.filter((x) => x.cuenta_id === c.id), notas: notas.find((n) => n.cuenta_id === c.id) || { n: 0, abiertas: 0 } })),
+      cuentas: await Promise.all(cuentas.map(async (c) => {
+        let espejo_ = null;
+        if (c.tipo === "notion") {
+          const conf = descifrarSeguro((await pool.query("SELECT config FROM cuentas WHERE id=$1", [c.id])).rows[0].config);
+          espejo_ = { flujo: !!conf.flujo, guia: !!conf.guia, modo: conf.espejo?.modo || null, bases: Object.keys(conf.espejo?.bases || {}).length };
+        }
+        return { ...c, calendarios: cals.filter((x) => x.cuenta_id === c.id), notas: notas.find((n) => n.cuenta_id === c.id) || { n: 0, abiertas: 0 }, espejo: espejo_ };
+      })),
+      importacion: (await getSetting(pool, "notion_importacion")) || null,
       ical: cals.filter((x) => !x.cuenta_id),
       bandeja: (await getSetting(pool, "bandeja_cuenta")) || null,
       redirect: { google: cfg.publicUrl ? redirectUri(cfg.publicUrl, "google") : null, outlook: cfg.publicUrl ? redirectUri(cfg.publicUrl, "outlook") : null },
@@ -588,6 +607,115 @@ export function createApp(pool, opts = {}) {
     await setSetting(pool, "prediccion", sanitizePred(await getPrediccion(pool), req.body));
     await done(res);
   }));
+
+  // ---------- Proyectos y pilares ----------
+  app.get("/api/proyectos", need, wrap(async (req, res) => res.json(await proyectos.listar(pool, { incluirArchivados: req.query.todos === "1" }))));
+  app.post("/api/proyectos", need, wrap(async (req, res) => { const p = await tx(pool, (q) => proyectos.crearProyecto(q, req.body)); await done(res, { proyecto: p }); }));
+  app.patch("/api/proyectos/:id", need, wrap(async (req, res) => { await tx(pool, (q) => proyectos.editarProyecto(q, req.params.id, req.body)); await done(res); }));
+  app.post("/api/pilares", need, wrap(async (req, res) => { const p = await tx(pool, (q) => proyectos.crearPilar(q, req.body)); await done(res, { pilar: p }); }));
+  app.patch("/api/pilares/:id", need, wrap(async (req, res) => { await tx(pool, (q) => proyectos.editarPilar(q, req.params.id, req.body)); await done(res); }));
+
+  // ---------- Las 9 bases de Notion ----------
+  // modo «crear»: bases nuevas «Veredicto · …»; «adoptar»: usa tus «TimeMachine - …» y (si quieres) importa su historial.
+  app.post("/api/cuentas/:id/notion-bases", need, wrap(async (req, res) => {
+    const cuenta = (await pool.query("SELECT * FROM cuentas WHERE id=$1 AND tipo='notion'", [req.params.id])).rows[0];
+    if (!cuenta) throw new core.HttpError(404, "Esa cuenta de Notion no existe.");
+    const { cfg: c, guardar } = await cuentaConfig(pool, cuenta);
+    const n = cfg.notionClient || notionA.cliente(c);
+    const modo = req.body.modo === "adoptar" ? "adoptar" : "crear";
+    let bases, faltan = [];
+    try {
+      if (modo === "adoptar") {
+        ({ bases, faltan } = await espejo.adoptar(n));
+        if (!Object.keys(bases).length) throw new core.HttpError(400, "No encontré bases «TimeMachine - …» ni «Veredicto · …». Compártelas con tu integración (••• → Conexiones) o elige «Crear nuevas».");
+      } else bases = await espejo.crear(n, c.raiz);
+      if (!c.flujo) c.flujo = await notionA.crearFlujo(c, n);
+      if (bases.proyectos) await espejo.enlazarFlujo(n, c.flujo, bases.proyectos);
+      if (!c.guia && req.body.guia !== false) c.guia = await espejo.guia(n, c.raiz, { flujo: c.flujo, bases }).catch(() => null);
+    } catch (e) { if (e instanceof core.HttpError) throw e; throw new core.HttpError(400, `Notion: ${e.message}`); }
+    c.espejo = { modo, bases };
+    await guardar(c);
+    const importar = modo === "adoptar" && req.body.importar !== false;
+    if (importar) {
+      const prog = { estado: "corriendo", cuenta: cuenta.id, inicio: Date.now(), log: [] };
+      await setSetting(pool, "notion_importacion", prog);
+      const anota = (m) => { prog.log.push(m); prog.log = prog.log.slice(-30); setSetting(pool, "notion_importacion", prog).catch(() => {}); changed("importacion"); };
+      espejo.importar(pool, n, bases, { log: anota }).then(async (r) => {
+        await setSetting(pool, "notion_importacion", { ...prog, estado: "listo", fin: Date.now(), resultado: r });
+        changed("importacion"); syncPronto();
+      }, async (e) => {
+        await setSetting(pool, "notion_importacion", { ...prog, estado: "error", fin: Date.now(), error: String(e.message).slice(0, 300) });
+        changed("importacion");
+      });
+    } else syncPronto();
+    await done(res, { bases: Object.keys(bases).length, faltan, importando: importar, guia: !!c.guia });
+  }));
+  app.get("/api/notion-importacion", need, wrap(async (req, res) => res.json((await getSetting(pool, "notion_importacion")) || null)));
+
+  // ---------- ActivityWatch: lo que haces en el computador ----------
+  app.post("/api/activitywatch/probar", need, wrap(async (req, res) => {
+    try { res.json({ ok: true, ...(await aw.probar(String(req.body.url || "").trim(), cfg.fetcher)) }); }
+    catch (e) { throw new core.HttpError(400, e.message); }
+  }));
+  app.put("/api/activitywatch", need, wrap(async (req, res) => {
+    const url = String(req.body.url || "").trim().replace(/\/$/, "");
+    if (!/^https?:\/\//.test(url)) throw new core.HttpError(400, "La dirección debe empezar con http:// (ej. http://192.168.68.20:5600).");
+    const activo = req.body.activo !== false;
+    if (activo) { try { await aw.probar(url, cfg.fetcher); } catch (e) { throw new core.HttpError(400, e.message); } }
+    const prev = (await getSetting(pool, "activitywatch")) || {};
+    await setSetting(pool, "activitywatch", { ...prev, url, activo, error: "" });
+    if (activo) await aw.sincronizar(pool, { horas: 24, fetcher: cfg.fetcher }).catch(() => {});
+    await done(res);
+  }));
+  app.delete("/api/activitywatch", need, wrap(async (req, res) => { await pool.query("DELETE FROM settings WHERE key='activitywatch'"); await done(res); }));
+  app.post("/api/activitywatch/sincronizar", need, wrap(async (req, res) => {
+    try { const r = await aw.sincronizar(pool, { horas: 24, fetcher: cfg.fetcher }); await done(res, { sync: r }); }
+    catch (e) { throw new core.HttpError(400, e.message); }
+  }));
+  app.get("/api/actividad", need, wrap(async (req, res) => {
+    const d = req.query.dia ? Date.parse(req.query.dia + "T12:00:00Z") : Date.now();
+    if (!Number.isFinite(d)) throw new core.HttpError(400, "Día no válido.");
+    const a = startOfDay(d, cfg.tz);
+    res.json(await aw.resumen(pool, a, addDays(a, 1, cfg.tz)));
+  }));
+  // Convierte tramos del computador en una sesión registrada (con su tarea o proyecto).
+  app.post("/api/actividad/registrar", need, wrap(async (req, res) => {
+    const ids = (Array.isArray(req.body.ids) ? req.body.ids : []).map(Number).filter(Number.isFinite).slice(0, 200);
+    if (!ids.length) throw new core.HttpError(400, "Elige qué tramos registrar.");
+    const r = await tx(pool, async (q) => {
+      const ts = (await q.query("SELECT * FROM actividad WHERE id = ANY($1) AND NOT registrado ORDER BY inicio", [ids])).rows;
+      if (!ts.length) throw new core.HttpError(409, "Esos tramos ya estaban registrados.");
+      let item = null;
+      if (req.body.item_id) item = (await q.query("SELECT * FROM items WHERE id=$1", [req.body.item_id])).rows[0];
+      const titulo = String(req.body.title || "").trim() || item?.title || ts[0].app;
+      if (!item) item = (await core.findItem(q, titulo)) || (await core.createItem(q, { title: titulo, proyecto_id: req.body.proyecto_id || null }));
+      else if (req.body.proyecto_id && !item.proyecto_id) await proyectos.asignar(q, item.id, req.body.proyecto_id);
+      // Une tramos separados por menos de 5 minutos.
+      const segs = [];
+      for (const t of ts) { const last = segs.at(-1); if (last && +t.inicio - last[1] <= 5 * 60000) last[1] = Math.max(last[1], +t.fin); else segs.push([+t.inicio, +t.fin]); }
+      const s = (await q.query("INSERT INTO sessions(item_id,title,state,started_at,ended_at,source) VALUES ($1,$2,'done',$3,$4,'computador') RETURNING id",
+        [item.id, item.title, new Date(segs[0][0]), new Date(segs.at(-1)[1])])).rows[0];
+      for (const [a, b] of segs) await q.query("INSERT INTO segments(session_id,started_at,ended_at) VALUES ($1,$2,$3)", [s.id, new Date(a), new Date(b)]);
+      await q.query("UPDATE actividad SET registrado=true WHERE id = ANY($1)", [ts.map((t) => t.id)]);
+      await core.enqueue(q, "sesion_cal", s.id);
+      await core.enqueueFlujo(q, { itemId: item.id });
+      await log(q, "actividad.registrada", `${item.title} · ${ts.length} tramos`);
+      return { sesion: s.id, ms: segs.reduce((a, [x, y]) => a + y - x, 0), title: item.title };
+    });
+    await done(res, r);
+  }));
+
+  // ---------- Modo demo ----------
+  app.post("/api/demo", need, wrap(async (req, res) => {
+    if ((await st()).demo) throw new core.HttpError(409, "Los datos de ejemplo ya están cargados.");
+    const r = await demo.cargar(pool, cfg.tz);
+    await log(pool, "demo.cargado", "");
+    changed(); res.json({ ok: true, ...r, estado: await st() });
+  }));
+  app.delete("/api/demo", need, wrap(async (req, res) => { await demo.borrar(pool); await log(pool, "demo.borrado", ""); changed(); res.json({ ok: true, estado: await st() }); }));
+
+  // ---------- MCP: tu asistente (Claude, Aurora) maneja tu tiempo ----------
+  mcpRouter(app, pool, { need, cfg });
 
   // ---------- Tokens para atajos ----------
   app.get("/api/tokens", need, wrap(async (req, res) => res.json((await pool.query("SELECT id,label,created_at,last_used_at FROM api_tokens ORDER BY created_at DESC")).rows)));

@@ -7,6 +7,11 @@ Veredicto junta tus calendarios (Google, iCloud, Outlook, CalDAV) y tus notas (O
 - **Calendarios en ambos sentidos.** Lo que mueves en Veredicto aparece en tu teléfono y al revés, cada 2 minutos. Tus bloques van a un calendario propio, «Veredicto · Plan»; lo medido, opcionalmente, a «Veredicto · Registrado».
 - **De idea a calendario en Notion.** La base «Flujo» guarda ideas, videos y gestiones. Lo que pasas a «Por hacer» entra solo en tus huecos libres, la hora vuelve a Notion y lo que mides suma en su fila.
 - **Notas = gestiones.** Cada casilla `- [ ]` de tus notas es una gestión. Márcala en la app, en Obsidian o en Notion y queda marcada en todos lados. Lo que capturas con Siri o Android cae en una nota «Bandeja» del día.
+- **Proyectos y pilares.** Agrupa tus tareas como en el Juez del Tiempo; cada minuto suma a su proyecto, con avance y fecha límite.
+- **Las 9 bases de Notion.** Pilares, Proyectos, Tareas, Ideas, Rutinas, Recurrencias, Calendario, Sesiones y Actividad: las crea o adopta tus «TimeMachine - …» e importa el historial.
+- **Tu computador.** Con ActivityWatch ve qué app tenías al frente y te deja registrar lo olvidado con un toque.
+- **Tu asistente.** Servidor MCP: Claude o Aurora pueden iniciar, parar, capturar, crear tareas y armar tu día.
+- **Datos de ejemplo y bienvenida guiada** para recorrer todo antes de conectar nada.
 - **Registro de tiempo** con una sola actividad abierta a la vez, desde la web, Siri, Android o el reloj.
 - **Vigilante.** Si no registras nada, te avisa a los 10, 30 y 60 minutos y después cada 10. Si algo agendado empieza, te manda el botón para iniciarlo. Funciona por ntfy, Telegram o webhook, con textos editables.
 - **Armar mi día.** Aprende tus hábitos (lo mismo a una hora parecida varios días) y te arma el día sin pisar tus reuniones. Tú decides qué puede agendar solo, qué solo sugerir y qué ignorar.
@@ -50,8 +55,10 @@ Para que funcionen los botones de los avisos y la conexión con Google u Outlook
 | iCloud (contraseña de app) | [docs/icloud.md](docs/icloud.md) |
 | Google Calendar (tu cliente OAuth) | [docs/google.md](docs/google.md) |
 | Outlook / Microsoft 365 (tu app de Azure) | [docs/outlook.md](docs/outlook.md) |
-| Obsidian y Notion | [docs/notas.md](docs/notas.md) |
+| Obsidian, Notion y las 9 bases del Juez | [docs/notas.md](docs/notas.md) |
 | Siri, Android y relojes | [docs/atajos.md](docs/atajos.md) |
+| Claude, Aurora y otros asistentes (MCP) | [docs/mcp.md](docs/mcp.md) |
+| Tu computador (ActivityWatch) | [docs/activitywatch.md](docs/activitywatch.md) |
 | Dominio con Cloudflare Tunnel | [docs/tunel.md](docs/tunel.md) |
 | Tema, logo y voz de los avisos | [docs/tema.md](docs/tema.md) |
 

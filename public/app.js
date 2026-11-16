@@ -67,6 +67,9 @@ async function refrescar() {
       S = await api("/api/estado");
       // En Ajustes hay formularios a medio llenar: se actualizan los datos sin redibujar.
       if (location.hash.startsWith("#agenda")) semana = null;
+      if (location.hash.startsWith("#proyectos")) PJ = null;
+      if (location.hash.startsWith("#registro")) { registro = null; AWD = null; }
+      if (location.hash.startsWith("#bienvenida")) { cuentasCfg = null; return; }
       if (location.hash.startsWith("#ajustes")) cuentasCfg = null; else render();
     } catch {}
   }, 120);
@@ -87,7 +90,7 @@ async function inicio() {
   if (sesion.dentro) {
     S = await api("/api/estado");
     conectarEnVivo();
-    if (!sesion.onboarding?.listo && !location.hash) location.hash = "#ajustes";
+    if (!sesion.onboarding?.listo && (!location.hash || location.hash === "#hoy")) location.hash = "#bienvenida";
   }
   render();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
@@ -105,15 +108,18 @@ window.addEventListener("hashchange", () => { document.querySelectorAll("dialog.
 function render() {
   clearInterval(tick);
   if (!sesion.dentro) { $("#nav").hidden = true; vista.replaceChildren(sesion.cuenta ? vistaEntrar() : vistaInstalar()); return; }
-  $("#nav").hidden = false;
   const [v0, sub] = location.hash.slice(1).split(/[?&]/)[0].split("/");
   const v = v0 || "hoy";
+  const asistente = v === "bienvenida";
+  $("#nav").hidden = asistente;
+  document.body.classList.toggle("en-bienvenida", asistente);
   const tab = { tareas: "gestiones", bandeja: "gestiones" }[v] || v;
   for (const a of document.querySelectorAll("#nav a")) a.classList.toggle("activa", a.dataset.v === tab);
   const foco = document.activeElement?.id, val = foco && document.activeElement.value;
-  const vistas = { hoy: vistaHoy, agenda: vistaAgenda, gestiones: vistaGestiones, tareas: vistaTareas, bandeja: vistaGestiones, registro: vistaRegistro, ajustes: vistaAjustes };
+  const vistas = { hoy: vistaHoy, agenda: vistaAgenda, proyectos: vistaProyectos, gestiones: vistaGestiones, tareas: vistaTareas, bandeja: vistaGestiones, registro: vistaRegistro, ajustes: vistaAjustes, bienvenida: () => vistaBienvenida(Number(sub) || 0) };
   const sub_ = { "ajustes/avisos": vistaPlantillas, "ajustes/algoritmo": vistaAlgoritmo }[`${v}/${sub}`];
-  vista.replaceChildren(...[].concat((sub_ || vistas[v] || vistaHoy)()).filter(Boolean));
+  const contenido = [].concat((sub_ || vistas[v] || vistaHoy)()).filter(Boolean);
+  vista.replaceChildren(...(S?.demo && !asistente ? [bandaDemo()] : []), ...contenido);
   // Mantiene lo que estabas escribiendo si llega una actualización en vivo.
   if (foco) { const el = document.getElementById(foco); if (el) { if (val != null) el.value = val; el.focus(); } }
 }
@@ -167,7 +173,8 @@ function iniciarPor(datos, btn) { return act(btn, () => api("/api/iniciar", { me
 function vistaHoy() {
   const now = Date.now();
   const input = h("input", { id: "que", list: "items-lista", placeholder: "¿Qué estás haciendo?", autocomplete: "off", enterkeyhint: "go" });
-  const ir = (e) => { const t = input.value.trim(); if (!t) return input.focus(); input.value = ""; iniciarPor({ title: t }, e?.target); };
+  const selPro = selectorProyecto("hoy-proyecto");
+  const ir = (e) => { const t = input.value.trim(); if (!t) return input.focus(); input.value = ""; iniciarPor({ title: t, proyecto_id: selPro?.value || null }, e?.target); };
   input.addEventListener("keydown", (e) => e.key === "Enter" && ir());
   const datalist = h("datalist", { id: "items-lista" }, S.items.filter((i) => i.status !== "hecha").map((i) => h("option", { value: i.title })));
 
@@ -193,6 +200,7 @@ function vistaHoy() {
     tarjetaAhora(),
     h("section", { class: "tarjeta" },
       h("div", { class: "fila" }, h("div", { class: "crece" }, input), h("button", { class: "primario", onclick: ir }, "Iniciar")), datalist,
+      selPro ? h("div", { class: "fila", style: "margin-top:.4rem" }, h("label", { for: "hoy-proyecto", style: "margin:0" }, "Proyecto"), h("div", { class: "crece" }, selPro)) : null,
       chipsData.length ? chips : h("p", { class: "suave" }, "Cuando registres unos días, aquí te sugiero lo que sueles hacer a esta hora.")),
     h("section", { class: "tarjeta" },
       h("div", { class: "fila" }, h("h2", { class: "crece" }, "Agenda · ", fecha(now)),
@@ -332,7 +340,7 @@ function vistaTareas() {
     h("button", { class: "icono", title: "Iniciar", "aria-label": "Iniciar " + i.title, onclick: (e) => iniciarPor({ item_id: i.id }, e.target) }, "▶"),
     h("span", { class: "que" }, i.title, h("small", {}, [
       i.kind === "rutina" && i.hora ? `${i.hora}${i.dias ? " · " + i.dias.map((d) => DIAS[d]).join(" ") : " · todos los días"}` : "",
-      i.due_date ? `vence ${i.due_date}` : "", i.status === "en curso" ? "en curso" : "", `${i.est_min} min`,
+      nombreProyecto(i.proyecto_id), i.eisenhower || "", i.due_date ? `vence ${i.due_date}` : "", i.status === "en curso" ? "en curso" : "", `${i.est_min} min`,
     ].filter(Boolean).join(" · "))),
     i.kind === "tarea" ? h("button", { class: "icono", title: i.status === "hecha" ? "Reabrir" : "Hecha", "aria-label": "Marcar hecha", onclick: (e) => act(e.target, () => api(`/api/items/${i.id}`, { method: "PATCH", body: { status: i.status === "hecha" ? "pendiente" : "hecha" } })) }, i.status === "hecha" ? "↺" : "✓") : null,
     h("button", { class: "icono", title: "Archivar", "aria-label": "Archivar", onclick: (e) => act(e.target, () => api(`/api/items/${i.id}`, { method: "PATCH", body: { status: "archivada" } }), "Archivada.") }, "✕"));
@@ -344,12 +352,15 @@ function vistaTareas() {
   const horaR = h("input", { id: "n-hora", type: "time" });
   const dias = DIAS.map((d, i) => h("label", { class: "chip", style: "display:inline-flex;align-items:center;gap:.3em;margin:0" }, h("input", { type: "checkbox", value: i, style: "width:auto" }), d));
   const extraR = h("div", { hidden: true }, h("label", { for: "n-hora" }, "Hora habitual (opcional)"), horaR, h("label", {}, "Días (ninguno = todos)"), h("div", { class: "chips" }, dias));
-  const extraT = h("div", {}, h("label", { for: "n-vence" }, "Fecha límite (opcional)"), vence);
+  const proT = selectorProyecto("n-proyecto", new URLSearchParams(location.hash.split("?")[1] || "").get("proyecto"));
+  const eis = h("select", { id: "n-eis" }, h("option", { value: "" }, "—"), EISEN.map((x) => h("option", { value: x }, x)));
+  const extraT = h("div", {}, h("div", { class: "col2" }, h("div", {}, h("label", { for: "n-vence" }, "Fecha límite (opcional)"), vence), h("div", {}, h("label", { for: "n-eis" }, "Eisenhower"), eis)),
+    proT ? [h("label", { for: "n-proyecto" }, "Proyecto"), proT] : null);
   tipo.addEventListener("change", () => { extraR.hidden = tipo.value !== "rutina"; extraT.hidden = tipo.value === "rutina"; });
   const crear = (e) => {
     const body = { kind: tipo.value, title: titulo.value.trim(), est_min: Number(est.value) || 30 };
     if (!body.title) return toast("Ponle nombre.", true);
-    if (body.kind === "tarea") body.due_date = vence.value || null;
+    if (body.kind === "tarea") { body.due_date = vence.value || null; body.eisenhower = eis.value || null; body.proyecto_id = proT?.value || null; }
     else { body.hora = horaR.value || null; body.dias = dias.map((l) => l.firstChild).filter((c) => c.checked).map((c) => Number(c.value)); }
     act(e.target, () => api("/api/items", { method: "POST", body }), "Creada.");
   };
@@ -416,11 +427,17 @@ function vistaRegistro() {
   for (const s of registro) { const k = fecha(s.start); if (!porDia.has(k)) porDia.set(k, []); porDia.get(k).push(s); }
   const sel = h("select", { id: "dias", onchange: () => { registroDias = Number(sel.value); registro = null; render(); } }, [7, 14, 30].map((d) => h("option", { value: d, selected: d === registroDias }, `Últimos ${d} días`)));
   const total = registro.reduce((a, s) => a + s.ms, 0);
+  const porPro = new Map();
+  for (const x of registro) { const k = nombreProyecto(x.proyecto_id) || "Sin proyecto"; porPro.set(k, (porPro.get(k) || 0) + x.ms); }
+  const maxP = Math.max(1, ...porPro.values());
 
   const q = h("input", { id: "r-que", list: "items-lista", placeholder: "Qué hiciste" });
   const a = h("input", { id: "r-a", type: "time" }), b = h("input", { id: "r-b", type: "time" });
   return [
-    h("section", { class: "tarjeta" }, h("div", { class: "fila" }, h("h2", { class: "crece" }, `Total ${fmtCorto(total)}`), h("div", {}, sel))),
+    h("section", { class: "tarjeta" }, h("div", { class: "fila" }, h("h2", { class: "crece" }, `Total ${fmtCorto(total)}`), h("div", {}, sel)),
+      porPro.size > 1 || (porPro.size === 1 && !porPro.has("Sin proyecto")) ? h("ul", { class: "lista" }, [...porPro].sort((a, b) => b[1] - a[1]).map(([k, ms]) =>
+        h("li", {}, h("span", { class: "que" }, k, h("div", { class: "barra-total", style: `width:${Math.max(4, (ms / maxP) * 100)}%` })), h("span", { class: "hora" }, fmtCorto(ms))))) : null),
+    tarjetaComputador(),
     h("section", { class: "tarjeta" }, h("details", {}, h("summary", {}, "Se me olvidó iniciar: registrar algo de hoy"),
       h("datalist", { id: "items-lista" }, S.items.map((i) => h("option", { value: i.title }))),
       h("label", { for: "r-que" }, "Qué"), q, h("div", { class: "col2" }, h("div", {}, h("label", { for: "r-a" }, "Desde"), a), h("div", {}, h("label", { for: "r-b" }, "Hasta"), b)),
@@ -455,13 +472,19 @@ function vistaAjustes() {
   const paso = (n, ok, titulo, ...cuerpo) => h("section", { class: "tarjeta" }, h("div", { class: "paso" + (ok ? " listo" : "") }, h("span", { class: "num" }, ok ? "✓" : n), h("div", {}, h("h3", {}, titulo), ...cuerpo)));
 
   return [
-    !sesion.onboarding?.listo ? h("section", { class: "tarjeta" }, h("h1", {}, "Configura en 4 pasos"),
-      h("p", { class: "suave" }, "Todo queda en tu servidor: las claves se guardan cifradas y nada pasa por terceros. Puedes saltarte pasos y volver cuando quieras."),
-      h("button", { class: "primario", onclick: (e) => act(e.target, async () => { await api("/api/onboarding", { method: "PUT", body: { listo: true } }); sesion.onboarding = { listo: true }; location.hash = "#hoy"; }) }, "Listo, ir a Hoy")) : null,
+    h("section", { class: "tarjeta asistente-link" }, h("div", { class: "fila" },
+      h("div", { class: "crece" }, h("h3", { style: "margin:0" }, "Asistente de bienvenida"), h("p", { class: "suave", style: "margin:.2rem 0 0" }, `${Object.values(listo).filter(Boolean).length + (S.activitywatch ? 1 : 0)} de 6 conectados`)),
+      h("a", { class: "boton primario", href: "#bienvenida/1" }, "Abrir"))),
     paso(1, listo.avisos, "Avisos al celular", pasoAvisos()),
     paso(2, listo.cal, "Calendarios: Google, iCloud, Outlook", pasoCalendarios()),
-    paso(3, listo.notas, "Notas: Obsidian o Notion", pasoNotas()),
-    paso(4, listo.atajos, "Atajos: Siri, Android y reloj", pasoAtajos()),
+    paso(3, listo.notas, "Notas: Notion (y sus 9 bases) u Obsidian", pasoNotas()),
+    paso(4, !!S.activitywatch, "Tu computador: ActivityWatch", pasoComputador()),
+    paso(5, listo.atajos, "Atajos: Siri, Android y reloj", pasoAtajos()),
+    paso(6, !!tokenMcp, "Tu asistente: Claude, Aurora (MCP)", pasoAsistente()),
+    h("section", { class: "tarjeta" }, h("h3", {}, "Datos de ejemplo"),
+      h("p", { class: "suave" }, S.demo ? "Tienes cargado el ejemplo: 4 pilares, 4 proyectos y 3 semanas de registros. No sale a tus calendarios ni a Notion." : "Carga 3 semanas de un ejemplo realista para ver cómo se ve todo antes de conectar nada. Se borra con un botón."),
+      S.demo ? h("button", { class: "peligro", onclick: (e) => act(e.target, async () => { await api("/api/demo", { method: "DELETE" }); PJ = null; registro = null; AWD = null; }, "Ejemplo borrado.") }, "Borrar datos de ejemplo")
+        : h("button", { onclick: (e) => act(e.target, async () => { await api("/api/demo", { method: "POST" }); PJ = null; registro = null; AWD = null; }, "Ejemplo cargado.") }, "Cargar datos de ejemplo")),
     tarjetaSync(),
     h("section", { class: "tarjeta" }, h("h3", {}, "Personalizar"),
       h("ul", { class: "lista" },
@@ -616,6 +639,7 @@ function pasoNotas() {
       h("div", { class: "fila" }, h("b", { class: "crece" }, c.nombre, " ", h("span", { class: "etiqueta" }, TIPOS[c.tipo])),
         h("button", { class: "icono peligro", title: "Desconectar", onclick: (e) => { if (confirm(`¿Desconectar ${c.nombre}? Tus notas no se tocan.`)) act(e.target, async () => { await api(`/api/cuentas/${c.id}`, { method: "DELETE" }); await recargarCuentas(); }); } }, "✕")),
       h("p", { class: "suave" }, `${estadoCuenta(c)} · ${c.notas.n} notas con casillas · ${c.notas.abiertas || 0} abiertas`),
+      c.tipo === "notion" ? basesNotion(c) : null,
       h("label", {}, h("input", { type: "radio", name: "bandeja", style: "width:auto", checked: cuentasCfg.bandeja === c.id, onchange: (e) => act(e.target, async () => { await api("/api/bandeja-destino", { method: "PUT", body: { cuenta_id: c.id } }); await recargarCuentas(); }, "Las capturas irán aquí.") }), " Las capturas van aquí"))),
     h("div", { class: "chips" },
       h("button", { class: "chip" + (conectando === "md" ? " activa" : ""), onclick: () => { conectando = conectando === "md" ? null : "md"; render(); } }, "+ Carpeta Markdown (Obsidian)"),
@@ -628,7 +652,7 @@ function pasoNotas() {
       h("ol", { class: "pasos" },
         h("li", {}, "Entra a ", h("a", { href: "https://www.notion.so/profile/integrations", target: "_blank", rel: "noopener" }, "notion.so/profile/integrations"), " → Nueva integración (interna) → copia el token."),
         h("li", {}, "Elige la página que contiene tus notas: ••• → Conexiones → agrega tu integración. Todo lo que cuelga de ella queda visible."),
-        h("li", {}, "Pega aquí el token y el enlace de esa página.")),
+        h("li", {}, "Pega aquí el token y el enlace de esa página. Después eliges: usar tus bases del Juez antiguo o crear las 9 nuevas.")),
       h("label", { for: "n-token" }, "Token"), tok, h("label", { for: "n-pag" }, "Enlace de la página"), pag, h("p"),
       h("button", { class: "primario", onclick: (e) => act(e.target, async () => { await api("/api/cuentas/notion", { method: "POST", body: { token: tok.value.trim(), pagina: pag.value.trim() } }); conectando = null; await recargarCuentas(); }, "Notion conectado.") }, "Conectar Notion")) : null,
   ];
@@ -765,6 +789,264 @@ function vistaAlgoritmo() {
         ventana: $("#p-vent").value, radio: $("#p-radio").value, modo_defecto: $("#p-def").value,
       }) }, "Guardar")),
   ];
+}
+
+// ---------- Bienvenida: el asistente de configuración ----------
+const PASOS_B = [
+  { k: "hola", nav: "Inicio" },
+  { k: "avisos", nav: "Avisos", icono: "🔔", titulo: "Te aviso cuando se te olvida", por: "El juez no deja tiempo sin registrar: si no estás midiendo nada, te reclama al celular con botones para iniciar lo que toca." },
+  { k: "cal", nav: "Calendarios", icono: "📅", titulo: "Tus calendarios, en ambos sentidos", por: "Ves tus eventos al planificar, tus bloques aparecen en el teléfono y lo medido queda como historial en tu calendario." },
+  { k: "notas", nav: "Notion", icono: "🗂", titulo: "Notion: de idea a tiempo en el calendario", por: "Tus ideas viven en Notion. Lo que marcas «Por hacer» entra solo en tus huecos libres, y las 9 bases del Juez se llenan con todo lo que haces." },
+  { k: "pc", nav: "Computador", icono: "💻", titulo: "Lo que haces en el computador", por: "Con ActivityWatch el juez ve qué app tenías al frente. Lo que no registraste te espera listo para asignarlo con un toque." },
+  { k: "atajos", nav: "Atajos", icono: "⌚", titulo: "Siri, reloj y tu asistente", por: "Inicia y para sin abrir la app: un toque en el reloj, «Oye Siri, Veredicto», o pídeselo a Claude." },
+  { k: "listo", nav: "Listo" },
+];
+function vistaBienvenida(n) {
+  if (!avisosCfg) { api("/api/avisos").then((r) => { avisosCfg = r; render(); }).catch((e) => toast(e.message, true)); return h("p", { class: "cargando" }, "Cargando…"); }
+  if (!cuentasCfg) { api("/api/cuentas").then((r) => { cuentasCfg = r; render(); }).catch((e) => toast(e.message, true)); return h("p", { class: "cargando" }, "Cargando…"); }
+  n = Math.max(0, Math.min(PASOS_B.length - 1, n));
+  const cu = cuentasCfg.cuentas, cx = S.conexiones;
+  const hecho = {
+    avisos: cx.avisos.ntfy || cx.avisos.telegram || cx.avisos.webhook,
+    cal: cu.some((c) => ["caldav", "google", "outlook"].includes(c.tipo) && c.activa) || cuentasCfg.ical.length > 0,
+    notas: cu.some((c) => c.tipo === "markdown" || c.tipo === "notion"),
+    pc: !!S.activitywatch,
+    atajos: !!tokenNuevo || !!tokenMcp || avisosCfg.tokens > 0,
+  };
+  const ir = (i) => { location.hash = `#bienvenida/${i}`; window.scrollTo({ top: 0 }); };
+  const terminar = (btn) => act(btn, async () => { await api("/api/onboarding", { method: "PUT", body: { listo: true } }); sesion.onboarding = { listo: true }; location.hash = "#hoy"; });
+  const migas = h("ol", { class: "migas", "aria-label": "Pasos" }, PASOS_B.map((p, i) => h("li", { class: [i === n ? "actual" : "", hecho[p.k] ? "hecho" : ""].join(" ") },
+    h("button", { onclick: () => ir(i), "aria-current": i === n ? "step" : null }, h("span", { class: "punto-paso" }, hecho[p.k] ? "✓" : i || "★"), h("span", { class: "etq" }, p.nav)))));
+  const pie = (extra) => h("div", { class: "pie-bienvenida" },
+    n > 0 ? h("button", { onclick: () => ir(n - 1) }, "‹ Atrás") : h("span"),
+    h("div", { class: "fila" }, extra, n < PASOS_B.length - 1 ? h("button", { class: "primario", onclick: () => ir(n + 1) }, PASOS_B[n].k !== "hola" && !hecho[PASOS_B[n].k] ? "Saltar por ahora ›" : "Siguiente ›") : null));
+
+  const p = PASOS_B[n];
+  // En el paso de Notion, el formulario parte abierto si todavía no hay notas conectadas.
+  if (p.k === "notas" && !hecho.notas && conectando == null) conectando = "notion";
+  if (p.k === "hola") {
+    const elegir = (demo) => (e) => act(e.currentTarget, async () => { if (demo && !S.demo) await api("/api/demo", { method: "POST" }); ir(1); }, demo ? "Ejemplo cargado: lo verás en Hoy, Proyectos y Registro." : null);
+    return h("div", { class: "bienvenida" }, migas,
+      h("section", { class: "heroe" },
+        h("img", { src: "/icono.svg", alt: "", class: "heroe-logo", width: 88, height: 88 }),
+        h("h1", {}, `Bienvenido a ${sesion.nombre}`),
+        h("p", { class: "lema" }, "El juez de tu tiempo, en tu servidor."),
+        h("p", { class: "suave" }, "Mides lo que haces, lo planificas en tu calendario y te avisa cuando se te escapa el día. Todo vive en tu servidor: tus claves van cifradas y nada pasa por terceros.")),
+      h("div", { class: "rasgos" },
+        [["⏱", "Mide sin esfuerzo", "Un toque, Siri, el reloj o tu asistente."], ["📅", "Calendario en ambos sentidos", "Google, iCloud y Outlook."], ["🗂", "Notion y Obsidian", "Flujo de idea a calendario y las 9 bases."],
+          ["🧭", "Proyectos y pilares", "Cada minuto suma a su proyecto."], ["💻", "Tu computador", "ActivityWatch: lo que hiciste, listo para registrar."], ["🔔", "Te reclama", "Avisos con botones, a tu manera."]]
+          .map(([i, t, d]) => h("div", { class: "rasgo" }, h("span", { class: "rasgo-icono", "aria-hidden": "true" }, i), h("b", {}, t), h("small", {}, d)))),
+      h("h2", { class: "centro" }, "¿Cómo quieres empezar?"),
+      h("div", { class: "opciones grandes" },
+        h("button", { class: "opcion", onclick: elegir(true) }, h("span", { class: "rasgo-icono" }, "✨"), h("b", {}, "Explorar con un ejemplo"), h("small", {}, "3 semanas de datos realistas para ver todo funcionando. Lo borras con un botón cuando quieras."), h("span", { class: "etiqueta" }, "Recomendado")),
+        h("button", { class: "opcion", onclick: elegir(false) }, h("span", { class: "rasgo-icono" }, "🧑‍⚖️"), h("b", {}, "Empezar con lo mío"), h("small", {}, "Vamos directo a conectar tu celular, calendarios, Notion y computador."))),
+      h("p", { class: "centro" }, h("button", { class: "enlace", onclick: (e) => terminar(e.target) }, "Saltar todo e ir a Hoy")));
+  }
+  if (p.k === "listo") {
+    const filas = PASOS_B.slice(1, -1).map((x, i) => h("li", {}, h("span", { class: "punto-paso" + (hecho[x.k] ? " ok" : "") }, hecho[x.k] ? "✓" : "·"),
+      h("span", { class: "que" }, x.titulo, h("small", {}, hecho[x.k] ? "Conectado" : "Pendiente: lo puedes hacer después en Ajustes")),
+      hecho[x.k] ? null : h("button", { onclick: () => ir(i + 1) }, "Conectar")));
+    return h("div", { class: "bienvenida" }, migas,
+      h("section", { class: "heroe" }, h("div", { class: "sello", "aria-hidden": "true" }, "⚖️"), h("h1", {}, "Todo listo"),
+        h("p", { class: "suave" }, "Desde ahora el juez mira tu día. Empieza por «Armar mi día»: ubica tus rutinas y lo «Por hacer» en tus huecos libres.")),
+      h("section", { class: "tarjeta" }, h("ul", { class: "lista" }, filas)),
+      h("section", { class: "tarjeta" }, h("h3", {}, "Tres cosas para hoy"),
+        h("ol", { class: "pasos" }, h("li", {}, "Toca ", h("b", {}, "Iniciar"), " cada vez que cambias de actividad (o dile a Siri)."), h("li", {}, "En ", h("b", {}, "Proyectos"), " crea tus 3 frentes principales."), h("li", {}, "Anota ideas en Notion → Flujo y pásalas a «Por hacer»."))),
+      h("div", { class: "pie-bienvenida" }, h("button", { onclick: () => ir(n - 1) }, "‹ Atrás"),
+        h("button", { class: "primario grande", style: "width:auto", onclick: (e) => terminar(e.target) }, "Ir a Hoy")));
+  }
+  const cuerpo = { avisos: pasoAvisos, cal: pasoCalendarios, notas: pasoNotas, pc: pasoComputador, atajos: () => [
+    h("h3", {}, "Siri, Android y reloj"), ...pasoAtajos(), h("hr"), h("h3", {}, "Claude, Aurora u otro asistente (MCP)"), ...pasoAsistente()] }[p.k]();
+  return h("div", { class: "bienvenida" }, migas,
+    h("section", { class: "tarjeta paso-b" },
+      h("div", { class: "cabeza-paso" }, h("span", { class: "rasgo-icono grande", "aria-hidden": "true" }, p.icono),
+        h("div", {}, h("p", { class: "contador" }, `Paso ${n} de ${PASOS_B.length - 2}`), h("h1", {}, p.titulo), h("p", { class: "suave" }, p.por))),
+      hecho[p.k] ? h("p", { class: "ok-paso" }, "✓ Conectado") : null,
+      ...[].concat(cuerpo)),
+    pie());
+}
+
+// ---------- Proyectos ----------
+const EISEN = ["Hacer ya", "Agendar", "Delegar", "Eliminar"];
+const nombreProyecto = (id) => (id ? S.proyectos.find((p) => p.id === id)?.nombre || "" : "");
+function selectorProyecto(id, actual = null) {
+  if (!S.proyectos.length) return null;
+  return h("select", { id }, h("option", { value: "" }, "Sin proyecto"), S.proyectos.map((p) => h("option", { value: p.id, selected: p.id === actual }, p.nombre)));
+}
+function bandaDemo() {
+  return h("div", { class: "banda-demo" },
+    h("span", { class: "crece" }, h("b", {}, "Datos de ejemplo. "), "Recorre todo sin miedo: nada de esto sale a tus calendarios ni a Notion."),
+    h("button", { onclick: (e) => { if (confirm("¿Borrar los datos de ejemplo? Lo tuyo no se toca.")) act(e.target, async () => { await api("/api/demo", { method: "DELETE" }); PJ = null; registro = null; AWD = null; }, "Ejemplo borrado."); } }, "Borrar ejemplo"));
+}
+const ESTADOS_P = { activo: "Activo", pausado: "Pausado", terminado: "Terminado", archivado: "Archivado" };
+let PJ = null, pjAbierto = null, pjForm = null;
+function vistaProyectos() {
+  if (!PJ) { api("/api/proyectos").then((r) => { PJ = r; render(); }).catch((e) => toast(e.message, true)); return h("p", { class: "cargando" }, "Cargando…"); }
+  const ps = PJ.proyectos.filter((p) => p.estado !== "archivado");
+  const semana = ps.reduce((a, p) => a + p.min_semana, 0);
+  const tareasDe = (p) => S.items.filter((i) => i.proyecto_id === p.id && i.kind === "tarea" && i.status !== "archivada");
+  const dias = (f) => Math.round((Date.parse(f + "T12:00:00") - Date.now()) / 864e5);
+  const tarjeta = (p) => {
+    const pil = PJ.pilares.find((x) => x.id === p.pilar_id);
+    const color = p.color || pil?.color || "var(--acento)";
+    const meta = p.minutos_plan || p.min_medidos + p.min_pendiente;
+    const pct = meta ? Math.min(100, Math.round((p.min_medidos / meta) * 100)) : 0;
+    const abierto = pjAbierto === p.id;
+    const ts = abierto ? tareasDe(p) : [];
+    const sig = tareasDe(p).find((i) => i.status === "en curso") || tareasDe(p).find((i) => i.status === "pendiente");
+    const d = p.fecha_limite ? dias(p.fecha_limite) : null;
+    const nueva = h("input", { id: `pt-${p.id}`, placeholder: "Nueva tarea de este proyecto", enterkeyhint: "done" });
+    const crear = (e) => { const t = nueva.value.trim(); if (!t) return; act(e?.target, async () => { await api("/api/items", { method: "POST", body: { title: t, proyecto_id: p.id } }); PJ = null; }, "Tarea creada."); };
+    nueva.addEventListener("keydown", (e) => e.key === "Enter" && crear());
+    return h("article", { class: "proyecto" + (p.estado !== "activo" ? " apagado" : ""), style: `--color:${color}` },
+      h("div", { class: "fila" },
+        h("button", { class: "que crece sin-borde", "aria-expanded": abierto ? "true" : "false", onclick: () => { pjAbierto = abierto ? null : p.id; render(); } },
+          h("b", {}, p.nombre), " ", p.estado !== "activo" ? h("span", { class: "etiqueta" }, ESTADOS_P[p.estado]) : null,
+          h("small", {}, [`${p.abiertas} abiertas`, p.hechas ? `${p.hechas} hechas` : "", d != null ? (d < 0 ? `venció hace ${-d} días` : d === 0 ? "vence hoy" : `vence en ${d} días`) : ""].filter(Boolean).join(" · "))),
+        sig ? h("button", { class: "icono", title: `Iniciar «${sig.title}»`, "aria-label": `Iniciar ${sig.title}`, onclick: (e) => iniciarPor({ item_id: sig.id }, e.target) }, "▶") : null),
+      h("div", { class: "progreso", role: "img", "aria-label": `${pct}% del tiempo planificado` }, h("span", { style: `width:${pct}%` })),
+      h("p", { class: "suave", style: "margin:.35rem 0 0" }, `${fmtCorto(p.min_medidos * 60000)} medidas${meta ? ` de ${fmtCorto(meta * 60000)}` : ""} · ${fmtCorto(p.min_semana * 60000)} esta semana${p.ultima ? ` · último ${new Date(p.ultima).toLocaleDateString("es-CL")}` : ""}`),
+      abierto ? h("div", { class: "detalle" },
+        ts.length ? h("ul", { class: "lista" }, ts.map((i) => h("li", { class: i.status === "hecha" ? "hecha" : "" },
+          h("button", { class: "icono", title: i.status === "hecha" ? "Reabrir" : "Hecha", onclick: (e) => act(e.target, async () => { await api(`/api/items/${i.id}`, { method: "PATCH", body: { status: i.status === "hecha" ? "pendiente" : "hecha" } }); PJ = null; }) }, i.status === "hecha" ? "☑" : "☐"),
+          h("span", { class: "que" }, i.title, h("small", {}, [i.eisenhower, `${i.est_min} min`, i.due_date ? `vence ${i.due_date}` : "", i.status === "en curso" ? "en curso" : ""].filter(Boolean).join(" · "))),
+          i.status !== "hecha" ? h("button", { class: "icono", title: "Iniciar", onclick: (e) => iniciarPor({ item_id: i.id }, e.target) }, "▶") : null))) : h("p", { class: "vacio" }, "Sin tareas todavía."),
+        h("div", { class: "fila", style: "margin-top:.5rem" }, h("div", { class: "crece" }, nueva), h("button", { onclick: crear }, "Agregar")),
+        h("div", { class: "fila", style: "margin-top:.5rem;flex-wrap:wrap" },
+          h("label", { for: `pe-${p.id}`, style: "margin:0" }, "Estado"),
+          h("select", { id: `pe-${p.id}`, style: "width:auto", onchange: (e) => act(e.target, async () => { await api(`/api/proyectos/${p.id}`, { method: "PATCH", body: { estado: e.target.value } }); PJ = null; }, "Listo.") },
+            Object.entries(ESTADOS_P).map(([k, l]) => h("option", { value: k, selected: p.estado === k }, l))),
+          h("input", { type: "date", "aria-label": "Fecha límite", style: "width:auto", value: p.fecha_limite || "", onchange: (e) => act(e.target, async () => { await api(`/api/proyectos/${p.id}`, { method: "PATCH", body: { fecha_limite: e.target.value || null } }); PJ = null; }, "Fecha guardada.") }))) : null);
+  };
+  const grupos = [...PJ.pilares.map((pl) => ({ pl, xs: ps.filter((p) => p.pilar_id === pl.id) })), { pl: null, xs: ps.filter((p) => !p.pilar_id || !PJ.pilares.some((x) => x.id === p.pilar_id)) }].filter((g) => g.xs.length);
+
+  const nombre = h("input", { id: "np-nombre", placeholder: "Ej: Lanzar la web" });
+  const pilar = h("select", { id: "np-pilar" }, h("option", { value: "" }, "Sin pilar"), PJ.pilares.map((x) => h("option", { value: x.id }, x.nombre)));
+  const limite = h("input", { id: "np-limite", type: "date" }), horas = h("input", { id: "np-horas", type: "number", min: 1, step: 1, placeholder: "opcional" });
+  const pilN = h("input", { id: "npl-nombre", placeholder: "Trabajo, Salud, Creación…" }), pilC = h("input", { id: "npl-color", type: "color", value: "#2f6df6", style: "width:3.2rem;padding:.2rem" });
+  return [
+    h("section", { class: "tarjeta" },
+      h("div", { class: "fila" }, h("h1", { class: "crece", style: "margin:0" }, "Proyectos"),
+        h("button", { onclick: () => { pjForm = pjForm === "p" ? null : "p"; render(); } }, "+ Proyecto"), h("button", { onclick: () => { pjForm = pjForm === "pl" ? null : "pl"; render(); } }, "+ Pilar")),
+      h("p", { class: "suave" }, ps.length ? `${ps.filter((p) => p.estado === "activo").length} activos · ${fmtCorto(semana * 60000)} esta semana. Los pilares agrupan proyectos (como en el Juez); cada tarea suma al suyo.` : "Agrupa tus tareas en proyectos y tus proyectos en pilares. Cada minuto que registras suma al proyecto de la tarea."),
+      pjForm === "p" ? h("div", { class: "cuenta" },
+        h("label", { for: "np-nombre" }, "Nombre"), nombre,
+        h("div", { class: "col2" }, h("div", {}, h("label", { for: "np-pilar" }, "Pilar"), pilar), h("div", { class: "col2" }, h("div", {}, h("label", { for: "np-limite" }, "Fecha límite"), limite), h("div", {}, h("label", { for: "np-horas" }, "Horas plan"), horas))),
+        h("p"), h("button", { class: "primario", onclick: (e) => { if (!nombre.value.trim()) return toast("Ponle nombre.", true); act(e.target, async () => {
+          await api("/api/proyectos", { method: "POST", body: { nombre: nombre.value.trim(), pilar_id: pilar.value || null, fecha_limite: limite.value || null, minutos_plan: horas.value ? Number(horas.value) * 60 : null } }); PJ = null; pjForm = null;
+        }, "Proyecto creado."); } }, "Crear proyecto")) : null,
+      pjForm === "pl" ? h("div", { class: "cuenta" },
+        h("label", { for: "npl-nombre" }, "Nombre del pilar"), h("div", { class: "fila" }, h("div", { class: "crece" }, pilN), pilC),
+        h("p"), h("button", { class: "primario", onclick: (e) => { if (!pilN.value.trim()) return toast("Ponle nombre.", true); act(e.target, async () => { await api("/api/pilares", { method: "POST", body: { nombre: pilN.value.trim(), color: pilC.value } }); PJ = null; pjForm = null; }, "Pilar creado."); } }, "Crear pilar")) : null),
+    ...grupos.map((g) => h("section", { class: "tarjeta" },
+      h("h2", {}, g.pl ? [h("span", { class: "color", style: `background:${g.pl.color || "var(--acento)"}` }), g.pl.nombre] : "Sin pilar", ` · ${fmtCorto(g.xs.reduce((a, p) => a + p.min_semana, 0) * 60000)} esta semana`),
+      h("div", { class: "proyectos" }, g.xs.map(tarjeta)))),
+    !ps.length && !pjForm ? h("section", { class: "tarjeta vacio" }, h("p", {}, "Todavía no tienes proyectos."),
+      h("div", { class: "fila", style: "justify-content:center;flex-wrap:wrap" },
+        h("button", { class: "primario", onclick: () => { pjForm = "p"; render(); } }, "Crear el primero"),
+        S.demo ? null : h("button", { onclick: (e) => act(e.target, async () => { await api("/api/demo", { method: "POST" }); PJ = null; }, "Ejemplo cargado.") }, "Ver un ejemplo"))) : null,
+  ];
+}
+
+// ---------- Computador (ActivityWatch) ----------
+let AWD = null, awSel = new Set();
+function tarjetaComputador() {
+  const aw = S.activitywatch;
+  if (!AWD) { api("/api/actividad").then((r) => { AWD = r; awSel = new Set(); render(); }).catch(() => { AWD = { tramos: [], apps: [], total_ms: 0, sin_registrar_ms: 0 }; render(); }); return null; }
+  if (!aw && !AWD.tramos.length) return h("section", { class: "tarjeta" }, h("h2", {}, "Tu computador"),
+    h("p", { class: "suave" }, "Conecta ActivityWatch y verás aquí lo que hiciste en el computador (apps y ventanas), listo para registrarlo con un toque."),
+    h("a", { href: "#ajustes", class: "boton" }, "Conectar en Ajustes ›"));
+  const libres = AWD.tramos.filter((t) => !t.registrado);
+  const max = Math.max(1, ...AWD.apps.map((a) => a.ms));
+  const titulo = h("input", { id: "aw-titulo", list: "items-lista", placeholder: "¿Qué era? (ej. API de pagos)" });
+  const pro = selectorProyecto("aw-proyecto");
+  return h("section", { class: "tarjeta" },
+    h("div", { class: "fila" }, h("h2", { class: "crece" }, `Tu computador hoy · ${fmtCorto(AWD.total_ms)}`),
+      aw ? h("button", { class: "icono", title: "Traer ahora", onclick: (e) => act(e.target, async () => { await api("/api/activitywatch/sincronizar", { method: "POST" }); AWD = null; }) }, "↻") : null),
+    aw?.error ? h("p", { class: "aviso-suave" }, `ActivityWatch: ${aw.error}`) : null,
+    AWD.sin_registrar_ms > 5 * 60000 ? h("p", { class: "suave" }, `${fmtCorto(AWD.sin_registrar_ms)} en el computador sin registrar. Marca los tramos y dime qué eran.`) : h("p", { class: "suave" }, "Todo lo del computador está registrado."),
+    h("ul", { class: "lista" }, AWD.apps.slice(0, 6).map((a) => h("li", {}, h("span", { class: "que" }, a.app, h("div", { class: "barra-total", style: `width:${Math.max(4, (a.ms / max) * 100)}%` })), h("span", { class: "hora" }, fmtCorto(a.ms))))),
+    libres.length ? h("details", { open: true }, h("summary", {}, `Sin registrar (${libres.length})`),
+      h("ul", { class: "lista" }, libres.map((t) => h("li", {}, h("label", { class: "tramo fila crece", style: "margin:0;color:inherit;font-size:1rem" },
+        h("input", { type: "checkbox", style: "width:auto;flex:none", checked: awSel.has(t.id), onchange: (e) => { e.target.checked ? awSel.add(t.id) : awSel.delete(t.id); } }),
+        h("span", { class: "que crece" }, t.app, h("small", {}, `${hora(t.inicio)}–${hora(t.fin)} · ${fmtCorto(t.fin - t.inicio)}${t.titulo ? " · " + t.titulo : ""}`)))))),
+      h("div", { class: "col2", style: "margin-top:.5rem" }, h("div", {}, titulo), pro ? h("div", {}, pro) : h("div")),
+      h("div", { class: "fila", style: "margin-top:.5rem" },
+        h("button", { onclick: () => { libres.forEach((t) => awSel.add(t.id)); render(); } }, "Marcar todo"),
+        h("button", { class: "primario", onclick: (e) => { if (!awSel.size) return toast("Marca al menos un tramo.", true); act(e.target, async () => {
+          await api("/api/actividad/registrar", { method: "POST", body: { ids: [...awSel], title: titulo.value.trim(), proyecto_id: pro?.value || null } }); AWD = null; registro = null;
+        }, "Registrado."); } }, "Registrar lo marcado"))) : null);
+}
+
+function pasoComputador() {
+  const aw = S.activitywatch;
+  const url = h("input", { id: "aw-url", value: aw?.url || "", placeholder: "http://192.168.68.20:5600", autocomplete: "off", inputmode: "url" });
+  return [
+    h("p", { class: "suave" }, "ActivityWatch es gratis y de código abierto: anota qué app y qué ventana tienes al frente, sin contar cuando estás lejos. Veredicto lo lee por tu red cada 5 minutos, te muestra lo que quedó sin registrar y te lo recuerda en los avisos («En el computador: Code, 40 min»)."),
+    aw ? h("div", { class: "cuenta" }, h("div", { class: "fila" }, h("b", { class: "crece" }, "ActivityWatch ", h("span", { class: "etiqueta" }, aw.url)),
+        h("button", { class: "icono peligro", title: "Desconectar", onclick: (e) => { if (confirm("¿Desconectar ActivityWatch? Lo ya registrado se queda.")) act(e.target, () => api("/api/activitywatch", { method: "DELETE" })); } }, "✕")),
+      h("p", { class: "suave" }, aw.error ? `✗ ${aw.error}` : aw.ultimo_ok ? `al día · ${hora(aw.ultimo_ok)}` : "conectando…")) : null,
+    h("ol", { class: "pasos" },
+      h("li", {}, "Instala ActivityWatch en tu Mac o PC desde ", h("a", { href: "https://activitywatch.net/downloads/", target: "_blank", rel: "noopener" }, "activitywatch.net"), " y ábrelo (queda en la barra de menú)."),
+      h("li", {}, "Deja que tu servidor lo lea por la red. En Mac, abre Terminal y pega:",
+        h("code", { class: "codigo" }, `mkdir -p ~/Library/Application\\ Support/activitywatch/aw-server-rust && printf 'host = "0.0.0.0"\\nport = 5600\\n' > ~/Library/Application\\ Support/activitywatch/aw-server-rust/config.toml`),
+        "Luego cierra ActivityWatch (ícono → Quit) y ábrelo de nuevo. En Windows el archivo está en %LOCALAPPDATA%\\activitywatch\\aw-server-rust\\config.toml."),
+      h("li", {}, "Mira la IP de tu computador: Ajustes del Sistema → Wi-Fi → Detalles → Dirección IP. Escríbela con :5600 al final."),
+      h("li", {}, "Fija esa IP en tu router (reserva DHCP) para que no cambie.")),
+    h("label", { for: "aw-url" }, "Dirección de ActivityWatch"), url,
+    h("div", { class: "fila", style: "margin-top:.6rem;flex-wrap:wrap" },
+      h("button", { onclick: (e) => act(e.target, async () => { const r = await api("/api/activitywatch/probar", { method: "POST", body: { url: url.value.trim() } }); toast(`Funciona. Equipos: ${r.equipos.join(", ")}`); }) }, "Probar"),
+      h("button", { class: "primario", onclick: (e) => act(e.target, async () => { await api("/api/activitywatch", { method: "PUT", body: { url: url.value.trim() } }); AWD = null; }, "Conectado: ya traje las últimas 24 horas.") }, aw ? "Guardar" : "Conectar")),
+  ];
+}
+
+// ---------- Asistente (MCP): Claude, Aurora u otro ----------
+let tokenMcp = null;
+function pasoAsistente() {
+  const base = (tokenMcp?.base || location.origin).replace(/\/$/, "");
+  const t = tokenMcp?.token;
+  const mcp = `${base}/mcp`;
+  return [
+    h("p", { class: "suave" }, "Veredicto es un servidor MCP: tu asistente puede preguntarle qué estás haciendo, iniciar y parar, capturar ideas, crear tareas en un proyecto, agendar y armar tu día. «Oye Claude, inicia edición del video en Canal de YouTube»."),
+    h("p", { class: "suave" }, "Herramientas: estado, iniciar, parar, pausar, seguir, capturar, agenda, proyectos, tareas, crear_tarea, completar_tarea, agendar, armar_dia, registro y actividad_computador."),
+    t ? h("div", {},
+      h("p", {}, h("b", {}, "Token del asistente (cópialo ahora, no se vuelve a mostrar):")), h("code", { class: "codigo" }, t),
+      h("details", { open: true }, h("summary", {}, "Claude (app de escritorio y web)"),
+        h("ol", { class: "pasos" },
+          h("li", {}, "Ajustes → Conectores → Agregar conector personalizado."),
+          h("li", {}, "Nombre: Veredicto. URL (es secreta, no la compartas):", h("code", { class: "codigo" }, `${mcp}?k=${t}`)),
+          h("li", {}, "Necesita tu dirección pública (el túnel): Claude se conecta desde internet."))),
+      h("details", {}, h("summary", {}, "Claude Code"), h("code", { class: "codigo" }, `claude mcp add --transport http veredicto ${mcp} --header "Authorization: Bearer ${t}"`)),
+      h("details", {}, h("summary", {}, "Otros (Cursor, Aurora, n8n…) · archivo de configuración"),
+        h("code", { class: "codigo" }, JSON.stringify({ mcpServers: { veredicto: { command: "npx", args: ["-y", "mcp-remote", mcp, "--header", `Authorization: Bearer ${t}`] } } }, null, 2)),
+        h("p", { class: "suave" }, "Si el programa acepta servidores HTTP directo: URL ", h("code", {}, mcp), " con encabezado Authorization: Bearer y tu token.")),
+      h("p", { class: "suave" }, "Este token solo sirve para el asistente y los atajos: no abre tus cuentas ni tus ajustes. Puedes revocarlo borrándolo."))
+      : h("button", { class: "primario", onclick: (e) => act(e.target, async () => { tokenMcp = await api("/api/tokens", { method: "POST", body: { label: "Asistente (MCP)" } }); avisosCfg && (avisosCfg.tokens = (avisosCfg.tokens || 0) + 1); }) }, "Crear token del asistente"),
+  ];
+}
+
+// ---------- Notion: las 9 bases del Juez ----------
+let importando = null;
+function basesNotion(c) {
+  const e = c.espejo || {};
+  const imp = cuentasCfg.importacion?.cuenta === c.id ? cuentasCfg.importacion : null;
+  if (imp?.estado === "corriendo" && !importando) importando = setTimeout(async () => { importando = null; try { await recargarCuentas(); render(); } catch {} }, 2500);
+  const elegir = (modo, importar) => (ev) => act(ev.target, async () => {
+    const r = await api(`/api/cuentas/${c.id}/notion-bases`, { method: "POST", body: { modo, importar } });
+    await recargarCuentas();
+    toast(r.importando ? "Importando tu historial…" : `Listo: ${r.bases} bases${r.faltan?.length ? ` (faltan ${r.faltan.join(", ")})` : ""}.`);
+  });
+  return h("div", { class: "bases" },
+    h("p", {}, h("b", {}, "Flujo"), " ", e.flujo ? "✓ creada: de idea a tiempo en el calendario, en ambos sentidos." : "se crea en la primera sincronización."),
+    e.bases ? h("p", {}, h("b", {}, `Las 9 bases · ${e.bases} conectadas`), ` (${e.modo === "adoptar" ? "tus TimeMachine del Juez" : "nuevas «Veredicto · …»"}). Se ponen al día cada 2 minutos.${e.guia ? " Hay una página «Veredicto · Cómo usar» con plantillas." : ""}`)
+      : h("div", {},
+        h("p", { class: "suave" }, "Pilares, Proyectos, Tareas, Ideas e Inbox, Rutinas y hábitos, Recurrencias, Calendario, Sesiones y Actividad y revisiones: igual que el Juez antiguo, para mirar y filtrar en Notion."),
+        h("div", { class: "opciones" },
+          h("button", { class: "opcion", onclick: elegir("adoptar", true) }, h("b", {}, "Usar mis bases del Juez"), h("small", {}, "Encuentra tus «TimeMachine - …», importa proyectos, tareas, sesiones e ideas, y las sigue llenando.")),
+          h("button", { class: "opcion", onclick: elegir("crear", false) }, h("b", {}, "Crear las 9 bases nuevas"), h("small", {}, "Bases limpias «Veredicto · …» bajo tu página, con una guía y plantillas.")))),
+    imp ? h("div", { class: "aviso-suave" },
+      h("b", {}, imp.estado === "corriendo" ? "Importando… " : imp.estado === "listo" ? "Importación lista. " : "La importación falló. "),
+      imp.estado === "listo" ? Object.entries(imp.resultado || {}).filter(([, n]) => n).map(([k, n]) => `${n} ${k}`).join(" · ") : imp.estado === "error" ? imp.error : (imp.log || []).slice(-1)[0] || "empezando") : null);
 }
 
 inicio().catch((e) => { vista.replaceChildren(h("p", { class: "vacio" }, "No pude conectar con el servidor. ", e.message)); });

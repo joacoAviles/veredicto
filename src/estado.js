@@ -45,7 +45,7 @@ export async function agendaRange(q, from, to) {
 export async function buildState(q, { tz, now = Date.now() }) {
   const day = startOfDay(now, tz), tomorrow = addDays(day, 1, tz);
   const pred = await getPrediccion(q);
-  const [items, current, agenda, done, captures, outbox, cals, cuentas, avisos, hab, conflictos] = await Promise.all([
+  const [items, current, agenda, done, captures, outbox, cals, cuentas, avisos, hab, conflictos, proyectos, pilares, demo, aw] = await Promise.all([
     q.query("SELECT * FROM items WHERE status <> 'archivada' AND NOT (status='hecha' AND updated_at < now() - interval '30 days') ORDER BY kind, (status='hecha'), (status='en curso') DESC, due_date NULLS LAST, created_at DESC LIMIT 500"),
     currentSession(q),
     agendaRange(q, day, tomorrow),
@@ -60,6 +60,10 @@ export async function buildState(q, { tz, now = Date.now() }) {
     getSetting(q, "avisos"),
     habitosConModo(q, now, tz, pred),
     q.query("SELECT count(*)::int n FROM conflictos WHERE NOT revisado"),
+    q.query("SELECT id, nombre, color, pilar_id, estado FROM proyectos WHERE estado IN ('activo','pausado') ORDER BY nombre"),
+    q.query("SELECT id, nombre, color FROM pilares WHERE estado='activo' ORDER BY orden, nombre"),
+    q.query("SELECT EXISTS(SELECT 1 FROM items WHERE demo) OR EXISTS(SELECT 1 FROM sessions WHERE demo) AS hay"),
+    getSetting(q, "activitywatch"),
   ]);
   const rutinas = items.rows.filter((i) => i.kind === "rutina" && i.status !== "archivada");
   const medido = done.rows.reduce((a, g) => a + Math.max(0, Math.min(ms(g.ended_at) || now, tomorrow) - Math.max(ms(g.started_at), day)), 0);
@@ -67,11 +71,14 @@ export async function buildState(q, { tz, now = Date.now() }) {
   return {
     now, tz, day,
     current,
+    proyectos: proyectos.rows, pilares: pilares.rows, demo: !!demo.rows[0].hay,
+    activitywatch: aw?.url ? { url: aw.url, activo: aw.activo !== false, ultimo_ok: aw.ultimo_ok || null, error: aw.error || "" } : null,
     items: items.rows.map((i) => ({
       id: i.id, kind: i.kind, title: i.title, status: i.status, est_min: i.est_min,
       due_date: i.due_date ? new Date(i.due_date).toISOString().slice(0, 10) : null,
       hora: i.hora ? String(i.hora).slice(0, 5) : null, dias: i.dias,
       fuente: i.fuente, nota: i.nota_titulo || null, nota_ref: i.nota_ref || null,
+      proyecto_id: i.proyecto_id || null, eisenhower: i.eisenhower || null, demo: !!i.demo,
       flujo: i.nota_ref === "flujo", etapa: i.etapa || null, tipo_nota: i.tipo_nota || null, agendable: !!i.agendable, bloque_id: i.bloque_id || null,
     })),
     agenda,

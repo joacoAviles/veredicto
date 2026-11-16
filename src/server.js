@@ -10,6 +10,10 @@ import { vigilar, DEFAULTS } from "./vigilante.js";
 import { armadoMatinal, changed } from "./servicios.js";
 import { enviar } from "./conectores/avisos.js";
 import { isValidZone } from "./time.js";
+import { readFileSync } from "node:fs";
+import { sincronizar as actividadSync } from "./sync/activitywatch.js";
+
+const version = JSON.parse(readFileSync(new URL("../package.json", import.meta.url))).version;
 
 const env = process.env;
 const tz = env.ZONA_HORARIA || env.TZ || "America/Santiago";
@@ -38,7 +42,7 @@ const nombre = env.NOMBRE || "Veredicto";
 const publicUrl = (env.URL_PUBLICA || "").replace(/\/$/, "");
 const app = createApp(pool, {
   tz, publicUrl, nombre, themeDir, notasDir,
-  theme: env.TEMA || "neutro",
+  theme: env.TEMA || "neutro", version,
   secureCookie: env.COOKIE_SEGURA ? env.COOKIE_SEGURA === "1" : undefined,
 });
 const port = Number(env.PORT || 8080);
@@ -66,6 +70,8 @@ every(minutosSync * 60_000, "sincronizar", async () => {
   const r = await sincronizar(pool, { tz });
   if (r.cuentas.length || r.cola.ok || r.cola.err) changed("sync");
 });
+// Lo que hiciste en el computador (ActivityWatch), cada 5 minutos.
+every(5 * 60_000, "activitywatch", async () => { const r = await actividadSync(pool, { horas: 6 }).catch((e) => ({ error: e.message })); if (r?.tramos) changed("actividad"); });
 every(10 * 60_000, "ical", async () => { await refreshCalendars(pool, tz); changed("calendarios"); });
 every(60_000, "vigilante", () => vigilar(pool, { tz, publicUrl, themeDir }));
 every(5 * 60_000, "armado", () => armadoMatinal(pool, tz, { publicUrl, themeDir }));

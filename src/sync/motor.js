@@ -4,6 +4,7 @@ import { cifrar, descifrar } from "../cifrado.js";
 import { log, getSetting } from "../db.js";
 import { dayKey } from "../time.js";
 import { enqueue, enqueueFlujo } from "../core.js";
+import * as espejo from "./espejo.js";
 import * as caldav from "./caldav.js";
 import * as google from "./google.js";
 import * as outlook from "./outlook.js";
@@ -145,19 +146,20 @@ export async function conciliarFila(q, cuenta, r) {
   const est = Math.max(5, Math.min(1440, Math.round(r.dur || prev?.est_min || 30)));
   const conHora = !!r.agendar?.conHora;
   const due = r.agendar && !conHora ? r.agendar.start.slice(0, 10) : null;
+  const proyectoId = r.proyecto ? (await q.query("SELECT ref FROM notion_espejo WHERE base='proyectos' AND replace(page_id,'-','')=$1", [r.proyecto.replace(/-/g, "")])).rows[0]?.ref || null : null;
   let item = prev;
   if (!prev) {
     item = (await q.query(
-      `INSERT INTO items(kind,title,status,est_min,due_date,fuente,cuenta_id,ext_id,nota_ref,nota_titulo,tipo_nota,etapa,agendable)
-       VALUES ('tarea',$1,$2,$3,$4,'notion',$5,$6,'flujo',$7,$7,$8,$9) RETURNING *`,
-      [r.titulo.slice(0, 300), STATUS[etapa], est, due, cuenta.id, r.id, r.tipo, etapa, etapa === "Por hacer" && !conHora])).rows[0];
+      `INSERT INTO items(kind,title,status,est_min,due_date,fuente,cuenta_id,ext_id,nota_ref,nota_titulo,tipo_nota,etapa,agendable,proyecto_id)
+       VALUES ('tarea',$1,$2,$3,$4,'notion',$5,$6,'flujo',$7,$7,$8,$9,$10) RETURNING *`,
+      [r.titulo.slice(0, 300), STATUS[etapa], est, due, cuenta.id, r.id, r.tipo, etapa, etapa === "Por hacer" && !conHora, proyectoId])).rows[0];
   } else if (pend) {
     await q.query("UPDATE items SET title=$2, est_min=$3, nota_titulo=$4, tipo_nota=$4, updated_at=now() WHERE id=$1", [prev.id, r.titulo.slice(0, 300), est, r.tipo]);
     return;
   } else {
     item = (await q.query(
-      `UPDATE items SET title=$2, status=$3, est_min=$4, due_date=$5, nota_titulo=$6, tipo_nota=$6, etapa=$7, agendable=$8, updated_at=now() WHERE id=$1 RETURNING *`,
-      [prev.id, r.titulo.slice(0, 300), STATUS[etapa], est, due, r.tipo, etapa, etapa === "Por hacer" && !conHora])).rows[0];
+      `UPDATE items SET title=$2, status=$3, est_min=$4, due_date=$5, nota_titulo=$6, tipo_nota=$6, etapa=$7, agendable=$8, proyecto_id=COALESCE($9, proyecto_id), updated_at=now() WHERE id=$1 RETURNING *`,
+      [prev.id, r.titulo.slice(0, 300), STATUS[etapa], est, due, r.tipo, etapa, etapa === "Por hacer" && !conHora, proyectoId])).rows[0];
   }
   const bloque = item.bloque_id ? (await q.query("SELECT * FROM blocks WHERE id=$1 AND borrado IS NULL", [item.bloque_id])).rows[0] : null;
   if (conHora && etapa !== "Archivada") {
@@ -200,6 +202,10 @@ async function pullNotas(pool, cuenta, cfg, guardar, o) {
     const filas = await notion.leerFlujo(cfg, cfg.cursor_flujo || null, n);
     for (const f of filas) await withTx(pool, (q) => conciliarFila(q, cuenta, f));
     if (filas.length && filas.at(-1).editado !== cfg.cursor_flujo) { cfg.cursor_flujo = filas.at(-1).editado; await guardar(cfg); }
+    if (cfg.espejo?.bases) {
+      const r = await espejo.publicar(pool, n, cfg.espejo.bases, { tz: o.tz });
+      if (r.hechos) await log(pool, "notion.espejo", `${r.hechos} filas al día en las 9 bases`);
+    }
     const desde = cfg.cursor || null;
     const pags = await notion.cambiadas(cfg, desde, n);
     for (const p of pags) {

@@ -85,21 +85,22 @@ export async function findItem(q, title) {
   return r.rows.map((it) => [score(it), it]).filter(([s]) => s).sort((a, b) => b[0] - a[0])[0]?.[1] || null;
 }
 
-export async function createItem(q, { kind = "tarea", title, est_min = 30, due_date = null, hora = null, dias = null }) {
+export async function createItem(q, { kind = "tarea", title, est_min = 30, due_date = null, hora = null, dias = null, proyecto_id = null, eisenhower = null }) {
   title = String(title || "").trim().slice(0, 300);
   if (!title) throw new HttpError(400, "Falta el nombre.");
   if (!["tarea", "rutina"].includes(kind)) throw new HttpError(400, "Tipo no válido.");
   const r = await q.query(
-    "INSERT INTO items(kind,title,est_min,due_date,hora,dias) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *",
-    [kind, title, clampMin(est_min), due_date || null, hora || null, dias?.length ? dias : null],
+    "INSERT INTO items(kind,title,est_min,due_date,hora,dias,proyecto_id,eisenhower) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *",
+    [kind, title, clampMin(est_min), due_date || null, hora || null, dias?.length ? dias : null, proyecto_id || null, EISEN.includes(eisenhower) ? eisenhower : null],
   );
   await log(q, kind + ".creada", title);
   return r.rows[0];
 }
+export const EISEN = ["Hacer ya", "Agendar", "Delegar", "Eliminar"];
 const clampMin = (v) => Math.max(1, Math.min(1440, Math.round(Number(v) || 30)));
 
 export async function updateItem(q, id, patch) {
-  const allowed = { title: 1, status: 1, est_min: 1, due_date: 1, hora: 1, dias: 1, agendable: 1 };
+  const allowed = { title: 1, status: 1, est_min: 1, due_date: 1, hora: 1, dias: 1, agendable: 1, proyecto_id: 1, eisenhower: 1 };
   const sets = [], vals = [id];
   for (const [k, v] of Object.entries(patch || {})) {
     if (!allowed[k]) continue;
@@ -110,6 +111,8 @@ export async function updateItem(q, id, patch) {
     if (k === "dias") val = Array.isArray(v) && v.length ? v.map(Number).filter((d) => d >= 0 && d <= 6) : null;
     if ((k === "hora" || k === "due_date") && !v) val = null;
     if (k === "agendable") val = !!v;
+    if (k === "proyecto_id") val = v || null;
+    if (k === "eisenhower") { if (v && !EISEN.includes(v)) throw new HttpError(400, "Cuadrante no válido (Hacer ya, Agendar, Delegar o Eliminar)."); val = v || null; }
     vals.push(val);
     sets.push(`${k}=$${vals.length}`);
   }
