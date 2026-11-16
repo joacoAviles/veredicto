@@ -22,8 +22,44 @@ let pool, server, base, cookie = "", notas;
 
 // Doble de Notion: una página raíz con casillas.
 const notionDb = { pages: [{ id: "pag1", title: "Proyecto", edited: "2026-11-16T10:00:00.000Z" }], todos: { pag1: [{ id: "blk1", text: "Llamar al notario", checked: false }] }, bandeja: [] };
+notionDb.flujo = [];
+const flujoPage = (f) => ({
+  id: f.id, last_edited_time: f.edited, properties: {
+    Nombre: { title: [{ plain_text: f.nombre }] }, Tipo: { select: f.tipo ? { name: f.tipo } : null }, Estado: { select: f.estado ? { name: f.estado } : null },
+    "Duración (min)": { number: f.dur ?? null }, Agendar: { date: f.agendar || null }, "Minutos registrados": { number: f.min ?? null }, "Última sesión": { date: null },
+  },
+});
+let reloj = Date.parse("2026-11-16T12:00:00.000Z");
+const tick = () => new Date((reloj += 1000)).toISOString();
 const fakeNotion = {
-  pages: { retrieve: async () => ({ id: "raiz" }), create: async () => ({ id: "bandejaPage" }) },
+  pages: {
+    retrieve: async () => ({ id: "raiz" }),
+    create: async ({ parent, properties }) => {
+      if (parent.database_id) {
+        const f = { id: "fila" + (notionDb.flujo.length + 1), nombre: properties.Nombre.title[0].text.content, tipo: properties.Tipo.select.name, estado: properties.Estado.select.name, edited: tick() };
+        notionDb.flujo.push(f);
+        return { id: f.id };
+      }
+      return { id: "bandejaPage" };
+    },
+    update: async ({ page_id, properties }) => {
+      const f = notionDb.flujo.find((x) => x.id === page_id);
+      if (!f) { const e = new Error("no"); e.status = 404; throw e; }
+      if (properties.Estado) f.estado = properties.Estado.select.name;
+      if (properties.Agendar) f.agendar = properties.Agendar.date;
+      if (properties["Minutos registrados"]) f.min = properties["Minutos registrados"].number;
+      f.edited = tick();
+      return {};
+    },
+  },
+  databases: {
+    create: async () => ({ id: "flujoDb" }),
+    query: async ({ filter }) => {
+      const desde = filter?.last_edited_time?.on_or_after;
+      const rows = notionDb.flujo.filter((f) => !desde || f.edited >= desde).sort((a, b) => (a.edited < b.edited ? -1 : 1));
+      return { results: rows.map(flujoPage), has_more: false };
+    },
+  },
   search: async () => ({ results: notionDb.pages.map((p) => ({ id: p.id, object: "page", last_edited_time: p.edited, properties: { title: { type: "title", title: [{ plain_text: p.title }] } } })), has_more: false }),
   blocks: {
     children: {
@@ -242,4 +278,59 @@ test("Google: lee instancias y escribe con If-Match", async () => {
   const p = llamadas.find((l) => l[0] === "PATCH");
   assert.equal(p[2]["If-Match"], '"2"');
   assert.equal(llamadas.filter((l) => l[1].includes("oauth2")).length, 1); // el token se reutiliza
+});
+
+
+test("Notion Flujo: de idea a bloque en el calendario y tiempo de vuelta", { skip: !URL }, async () => {
+  await pool.query("INSERT INTO settings(key,value) VALUES ('avisos', $1) ON CONFLICT (key) DO UPDATE SET value=$1", [JSON.stringify({ activo: true, desde: "00:00", hasta: "00:00", canales: {} })]);
+  // 1. En Notion: un video «Por hacer» de 15 min.
+  notionDb.flujo.push({ id: "v1", nombre: "Video R22", tipo: "Video", estado: "Por hacer", dur: 15, edited: tick() });
+  await sync();
+  let it = (await pool.query("SELECT * FROM items WHERE ext_id='v1'")).rows[0];
+  assert.equal(it.etapa, "Por hacer");
+  assert.equal(it.agendable, true);
+  assert.equal(it.nota_titulo, "Video");
+  // 2. «Armar mi día» lo pone en un hueco y escribe la hora en Notion.
+  const r = await call("/api/armar", { method: "POST" });
+  assert.equal(r.status, 200);
+  assert.ok(r.body.plan.some((p) => p.item_id === it.id), "el video entra al plan");
+  await sync();
+  it = (await pool.query("SELECT * FROM items WHERE id=$1", [it.id])).rows[0];
+  assert.ok(it.bloque_id);
+  const f = notionDb.flujo.find((x) => x.id === "v1");
+  assert.equal(f.estado, "Agendada");
+  assert.ok(f.agendar?.start);
+  // 3. Registras 20 minutos: suman en la fila.
+  await call("/api/iniciar", { method: "POST", body: { item_id: it.id } });
+  assert.equal((await pool.query("SELECT etapa FROM items WHERE id=$1", [it.id])).rows[0].etapa, "Agendada");
+  await pool.query("UPDATE segments SET started_at=now()-interval '20 minutes' WHERE ended_at IS NULL");
+  await pool.query("UPDATE sessions SET started_at=now()-interval '20 minutes' WHERE state='running'");
+  await call("/api/parar", { method: "POST" });
+  await sync();
+  assert.equal(f.min, 20);
+  assert.equal(f.estado, "En curso");
+  // 4. La marcas hecha en la app: queda «Hecha» en Notion.
+  await call(`/api/items/${it.id}`, { method: "PATCH", body: { status: "hecha" } });
+  await sync();
+  assert.equal(f.estado, "Hecha");
+  // 5. En Notion le pones hora a otra fila: aparece como bloque.
+  const inicio = new Date(Date.now() + 5 * 3600e3);
+  inicio.setUTCSeconds(0, 0);
+  notionDb.flujo.push({ id: "g1", nombre: "Notario", tipo: "Gestión", estado: "Agendada", dur: 45, agendar: { start: inicio.toISOString() }, edited: tick() });
+  await sync();
+  const g = (await pool.query("SELECT i.*, b.starts_at, b.ends_at FROM items i JOIN blocks b ON b.id=i.bloque_id WHERE i.ext_id='g1'")).rows[0];
+  assert.equal(+g.starts_at, +inicio);
+  assert.equal(+g.ends_at - +g.starts_at, 45 * 60000);
+  // Le quitas la hora en Notion: el bloque sale de la agenda.
+  notionDb.flujo.find((x) => x.id === "g1").agendar = null;
+  notionDb.flujo.find((x) => x.id === "g1").edited = tick();
+  await sync();
+  assert.ok((await pool.query("SELECT borrado FROM blocks WHERE id=(SELECT id FROM blocks WHERE title='Notario' ORDER BY starts_at DESC LIMIT 1)")).rows[0].borrado);
+  // 6. Una captura por Siri cae como fila «Bandeja».
+  await pool.query("UPDATE settings SET value=to_jsonb((SELECT id::text FROM cuentas WHERE tipo='notion' LIMIT 1)) WHERE key='bandeja_cuenta'");
+  await call("/api/capturas", { method: "POST", body: { text: "Idea: video sobre el carburador" } });
+  await sync();
+  const nueva = notionDb.flujo.find((x) => x.nombre === "Idea: video sobre el carburador");
+  assert.ok(nueva);
+  assert.equal(nueva.estado, "Bandeja");
 });

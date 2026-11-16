@@ -14,6 +14,11 @@ export const enqueue = (q, kind, ref, datos = {}) =>
     [kind, ref, JSON.stringify(datos)],
   ).then(() => q.query("UPDATE outbox SET next_at=now(), status='pendiente' WHERE kind=$1 AND status='error' AND (ref=$2 OR ($2::uuid IS NULL AND datos=$3::jsonb))", [kind, ref, JSON.stringify(datos)]));
 
+// Si un ítem viene de la base «Flujo» de Notion, su fila se actualiza (estado, hora agendada, minutos).
+export const enqueueFlujo = (q, { itemId = null, bloqueId = null }) =>
+  q.query("SELECT id FROM items WHERE nota_ref='flujo' AND (id=$1 OR bloque_id=$2)", [itemId, bloqueId])
+    .then(async (r) => { for (const it of r.rows) await enqueue(q, "gestion", it.id); });
+
 // Serializa todo lo que toca la actividad abierta.
 export const lockTimer = (q) => q.query("SELECT pg_advisory_xact_lock(4317001)");
 
@@ -44,6 +49,7 @@ export async function stop(q, { now = new Date() } = {}) {
   const end = await q.query("SELECT MAX(ended_at) AS e FROM segments WHERE session_id=$1", [s.id]);
   await q.query("UPDATE sessions SET state='done', ended_at=$2 WHERE id=$1", [s.id, end.rows[0].e]);
   await enqueue(q, "sesion_cal", s.id);
+  if (s.item_id) await enqueueFlujo(q, { itemId: s.item_id });
   await log(q, "timer.parado", s.title);
   return { ...s, state: "done", ms };
 }
@@ -93,7 +99,7 @@ export async function createItem(q, { kind = "tarea", title, est_min = 30, due_d
 const clampMin = (v) => Math.max(1, Math.min(1440, Math.round(Number(v) || 30)));
 
 export async function updateItem(q, id, patch) {
-  const allowed = { title: 1, status: 1, est_min: 1, due_date: 1, hora: 1, dias: 1 };
+  const allowed = { title: 1, status: 1, est_min: 1, due_date: 1, hora: 1, dias: 1, agendable: 1 };
   const sets = [], vals = [id];
   for (const [k, v] of Object.entries(patch || {})) {
     if (!allowed[k]) continue;
@@ -103,6 +109,7 @@ export async function updateItem(q, id, patch) {
     if (k === "est_min") val = clampMin(v);
     if (k === "dias") val = Array.isArray(v) && v.length ? v.map(Number).filter((d) => d >= 0 && d <= 6) : null;
     if ((k === "hora" || k === "due_date") && !v) val = null;
+    if (k === "agendable") val = !!v;
     vals.push(val);
     sets.push(`${k}=$${vals.length}`);
   }
@@ -113,6 +120,10 @@ export async function updateItem(q, id, patch) {
   if (patch.status === "hecha") {
     const s = await openSession(q);
     if (s && s.item_id === id) await stop(q);
+  }
+  if (patch?.agendable && it.nota_ref === "flujo" && !it.bloque_id) {
+    await q.query("UPDATE items SET etapa='Por hacer' WHERE id=$1", [id]);
+    await enqueue(q, "gestion", id);
   }
   if (it.fuente !== "app" && "status" in (patch || {})) await enqueue(q, "gestion", id);
   return it;
@@ -195,6 +206,7 @@ export async function updateBlock(q, id, { title, starts_at, ends_at, borrar = f
     await q.query("UPDATE blocks SET title=$2, starts_at=$3, ends_at=$4, actualizado=now() WHERE id=$1", [id, t, a, z]);
   }
   await enqueue(q, "bloque", id);
+  await enqueueFlujo(q, { bloqueId: id });
 }
 
 // Mueve o renombra un evento de otro calendario (solo los que no se repiten).

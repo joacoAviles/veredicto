@@ -3,6 +3,7 @@
 import { cifrar, descifrar } from "../cifrado.js";
 import { log, getSetting } from "../db.js";
 import { dayKey } from "../time.js";
+import { enqueue, enqueueFlujo } from "../core.js";
 import * as caldav from "./caldav.js";
 import * as google from "./google.js";
 import * as outlook from "./outlook.js";
@@ -93,12 +94,14 @@ export async function conciliarBloques(q, cal, remotos, now) {
     }
     await q.query("UPDATE blocks SET title=$2, starts_at=$3, ends_at=$4, etag=$5, href=$6, actualizado=now() WHERE id=$1",
       [b.id, String(r.title).slice(0, 300), new Date(r.starts_at), new Date(r.ends_at), r.etag, r.href]);
+    if (+b.starts_at !== r.starts_at || +b.ends_at !== r.ends_at) await enqueueFlujo(q, { bloqueId: b.id });
   }
   const desde = now - VENTANA.atras, hasta = now + VENTANA.adelante;
   for (const b of bloques) {
     if (vistos.has(b.remote_uid) || b.borrado || pendientes.has(b.id)) continue;
     if (+b.starts_at < desde || +b.starts_at > hasta) continue;
     await q.query("UPDATE blocks SET borrado=now() WHERE id=$1", [b.id]); // a la papelera, 30 días
+    await enqueueFlujo(q, { bloqueId: b.id });
   }
 }
 
@@ -133,6 +136,51 @@ export async function conciliarNota(q, cuenta, nota, tareas) {
   );
 }
 
+// ---------- Base «Flujo» de Notion: cada fila es un ítem; con hora agendada, un bloque en tu calendario ----------
+const STATUS = { Bandeja: "pendiente", Idea: "pendiente", "Por hacer": "pendiente", Agendada: "pendiente", "En curso": "en curso", Hecha: "hecha", Archivada: "archivada" };
+export async function conciliarFila(q, cuenta, r) {
+  const prev = (await q.query("SELECT * FROM items WHERE cuenta_id=$1 AND ext_id=$2", [cuenta.id, r.id])).rows[0];
+  const pend = prev ? (await q.query("SELECT 1 FROM outbox WHERE kind='gestion' AND ref=$1 AND status<>'ok'", [prev.id])).rowCount > 0 : false;
+  const etapa = r.archivada ? "Archivada" : r.etapa;
+  const est = Math.max(5, Math.min(1440, Math.round(r.dur || prev?.est_min || 30)));
+  const conHora = !!r.agendar?.conHora;
+  const due = r.agendar && !conHora ? r.agendar.start.slice(0, 10) : null;
+  let item = prev;
+  if (!prev) {
+    item = (await q.query(
+      `INSERT INTO items(kind,title,status,est_min,due_date,fuente,cuenta_id,ext_id,nota_ref,nota_titulo,tipo_nota,etapa,agendable)
+       VALUES ('tarea',$1,$2,$3,$4,'notion',$5,$6,'flujo',$7,$7,$8,$9) RETURNING *`,
+      [r.titulo.slice(0, 300), STATUS[etapa], est, due, cuenta.id, r.id, r.tipo, etapa, etapa === "Por hacer" && !conHora])).rows[0];
+  } else if (pend) {
+    await q.query("UPDATE items SET title=$2, est_min=$3, nota_titulo=$4, tipo_nota=$4, updated_at=now() WHERE id=$1", [prev.id, r.titulo.slice(0, 300), est, r.tipo]);
+    return;
+  } else {
+    item = (await q.query(
+      `UPDATE items SET title=$2, status=$3, est_min=$4, due_date=$5, nota_titulo=$6, tipo_nota=$6, etapa=$7, agendable=$8, updated_at=now() WHERE id=$1 RETURNING *`,
+      [prev.id, r.titulo.slice(0, 300), STATUS[etapa], est, due, r.tipo, etapa, etapa === "Por hacer" && !conHora])).rows[0];
+  }
+  const bloque = item.bloque_id ? (await q.query("SELECT * FROM blocks WHERE id=$1 AND borrado IS NULL", [item.bloque_id])).rows[0] : null;
+  if (conHora && etapa !== "Archivada") {
+    const a = Date.parse(r.agendar.start), z = r.agendar.end ? Date.parse(r.agendar.end) : a + est * 60000;
+    if (!(a < z)) return;
+    if (bloque) {
+      if (+bloque.starts_at !== a || +bloque.ends_at !== z || bloque.title !== item.title) {
+        await q.query("UPDATE blocks SET title=$2, starts_at=$3, ends_at=$4, actualizado=now() WHERE id=$1", [bloque.id, item.title, new Date(a), new Date(z)]);
+        await enqueue(q, "bloque", bloque.id);
+      }
+    } else {
+      const b = (await q.query("INSERT INTO blocks(item_id,title,starts_at,ends_at,origin) VALUES ($1,$2,$3,$4,'manual') RETURNING id", [item.id, item.title, new Date(a), new Date(z)])).rows[0];
+      await q.query("UPDATE items SET bloque_id=$2 WHERE id=$1", [item.id, b.id]);
+      await enqueue(q, "bloque", b.id);
+    }
+  } else if (bloque && (!r.agendar || etapa === "Archivada") && +bloque.ends_at > Date.now()) {
+    // Le quitaste la hora en Notion: el bloque futuro sale del calendario.
+    await q.query("UPDATE blocks SET borrado=now(), actualizado=now() WHERE id=$1", [bloque.id]);
+    await q.query("UPDATE items SET bloque_id=NULL WHERE id=$1", [item.id]);
+    await enqueue(q, "bloque", bloque.id);
+  }
+}
+
 async function pullNotas(pool, cuenta, cfg, guardar, o) {
   if (cuenta.tipo === "markdown") {
     await markdown.verificar(cfg);
@@ -148,6 +196,10 @@ async function pullNotas(pool, cuenta, cfg, guardar, o) {
     for (const ref of vistos.keys()) if (!actuales.has(ref)) await withTx(pool, (q) => conciliarNota(q, cuenta, { ref, titulo: "", version: "borrada" }, []));
   } else if (cuenta.tipo === "notion") {
     const n = o.notionClient || notion.cliente(cfg, o.fetcher === fetch ? undefined : o.fetcher);
+    if (!cfg.flujo) { cfg.flujo = await notion.crearFlujo(cfg, n); await guardar(cfg); }
+    const filas = await notion.leerFlujo(cfg, cfg.cursor_flujo || null, n);
+    for (const f of filas) await withTx(pool, (q) => conciliarFila(q, cuenta, f));
+    if (filas.length && filas.at(-1).editado !== cfg.cursor_flujo) { cfg.cursor_flujo = filas.at(-1).editado; await guardar(cfg); }
     const desde = cfg.cursor || null;
     const pags = await notion.cambiadas(cfg, desde, n);
     for (const p of pags) {
@@ -246,6 +298,20 @@ async function despacharUno(pool, job, o) {
     if (!it || !it.ext_id) return;
     const { cfg, opts } = await conCfg({ id: it.cuenta_id, config: it.config });
     const hecha = it.status === "hecha";
+    if (it.tipo === "notion" && it.nota_ref === "flujo") {
+      const n = o.notionClient || notion.cliente(cfg);
+      const b = it.bloque_id ? (await pool.query("SELECT * FROM blocks WHERE id=$1 AND borrado IS NULL", [it.bloque_id])).rows[0] : null;
+      const t = (await pool.query(
+        `SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (g.ended_at-g.started_at))),0)::float/60 AS min, max(s.ended_at) AS ultima
+         FROM sessions s JOIN segments g ON g.session_id=s.id WHERE s.item_id=$1 AND s.state='done'`, [it.id])).rows[0];
+      const etapa = { hecha: "Hecha", archivada: "Archivada", "en curso": "En curso" }[it.status] || (b ? "Agendada" : it.etapa === "Agendada" || it.etapa === "En curso" ? "Por hacer" : it.etapa || "Por hacer");
+      await notion.escribirFila(cfg, it.ext_id, {
+        etapa, minutos: t.min, ultima: t.ultima ? new Date(t.ultima).toISOString() : null,
+        agendar: b ? { start: new Date(b.starts_at).toISOString(), end: new Date(b.ends_at).toISOString() } : it.etapa === "Agendada" ? null : undefined,
+      }, n);
+      await pool.query("UPDATE items SET etapa=$2 WHERE id=$1", [it.id, etapa]);
+      return;
+    }
     if (it.tipo === "markdown") await markdown.marcar(cfg, it.nota_ref, it.ext_id, hecha, { hoy: dayKey(Date.now(), o.tz) });
     else if (it.tipo === "notion") await notion.marcar(cfg, it.ext_id, hecha, o.notionClient || notion.cliente(cfg));
     void opts;
@@ -258,6 +324,7 @@ async function despacharUno(pool, job, o) {
     const { cfg, opts } = await conCfg(cuenta);
     const texto = [c.text, c.body].filter(Boolean).join("\n");
     if (cuenta.tipo === "markdown") await markdown.bandeja(cfg, texto, { dia: dayKey(+c.created_at, o.tz), casilla: c.kind !== "nota" });
+    else if (cfg.flujo) await notion.nuevaFila(cfg, texto, { tipo: c.kind === "nota" ? "Nota" : "Idea", etapa: "Bandeja" }, o.notionClient || notion.cliente(cfg));
     else await notion.bandeja(cfg, texto, { onConfig: opts.onConfig }, o.notionClient || notion.cliente(cfg));
     await pool.query("UPDATE captures SET status='procesada', updated_at=now() WHERE id=$1", [c.id]);
   }

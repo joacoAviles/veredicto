@@ -84,3 +84,81 @@ export async function bandeja(cfg, texto, { onConfig } = {}, n = cliente(cfg)) {
   });
   return cfg.bandeja;
 }
+
+// ---------- Base «Flujo»: de idea a tiempo en el calendario ----------
+// Cada fila es una idea, gestión, video o nota; el cuerpo de la página es la nota misma.
+export const ETAPAS = ["Bandeja", "Idea", "Por hacer", "Agendada", "En curso", "Hecha", "Archivada"];
+export const TIPOS = ["Idea", "Video", "Gestión", "Nota"];
+const P = { nombre: "Nombre", tipo: "Tipo", etapa: "Estado", dur: "Duración (min)", agendar: "Agendar", min: "Minutos registrados", ultima: "Última sesión" };
+const COLOR = { Bandeja: "gray", Idea: "purple", "Por hacer": "orange", Agendada: "blue", "En curso": "yellow", Hecha: "green", Archivada: "brown" };
+
+export async function crearFlujo(cfg, n = cliente(cfg)) {
+  const db = await n.databases.create({
+    parent: { type: "page_id", page_id: pageIdFrom(cfg.raiz) },
+    title: [{ type: "text", text: { content: "Flujo" } }],
+    properties: {
+      [P.nombre]: { title: {} },
+      [P.tipo]: { select: { options: TIPOS.map((name) => ({ name })) } },
+      [P.etapa]: { select: { options: ETAPAS.map((name) => ({ name, color: COLOR[name] })) } },
+      [P.dur]: { number: { format: "number" } },
+      [P.agendar]: { date: {} },
+      [P.min]: { number: { format: "number" } },
+      [P.ultima]: { date: {} },
+    },
+  });
+  return db.id;
+}
+
+const sel = (p) => p?.select?.name || null;
+export function fila(page) {
+  const pr = page.properties || {};
+  const ag = pr[P.agendar]?.date || null;
+  return {
+    id: page.id,
+    titulo: plano(pr[P.nombre]?.title) || "Sin título",
+    tipo: sel(pr[P.tipo]) || "Idea",
+    etapa: ETAPAS.includes(sel(pr[P.etapa])) ? sel(pr[P.etapa]) : "Bandeja",
+    dur: Number(pr[P.dur]?.number) || null,
+    agendar: ag?.start ? { start: ag.start, end: ag.end || null, conHora: ag.start.length > 10 } : null,
+    editado: page.last_edited_time,
+    archivada: !!(page.archived || page.in_trash),
+  };
+}
+
+// Filas editadas desde «desde» (ISO), de la más antigua a la más nueva.
+export async function leerFlujo(cfg, desde, n = cliente(cfg)) {
+  const out = [];
+  let cursor;
+  for (let i = 0; i < 20; i++) {
+    const r = await n.databases.query({
+      database_id: cfg.flujo, page_size: 100, start_cursor: cursor,
+      sorts: [{ timestamp: "last_edited_time", direction: "ascending" }],
+      ...(desde ? { filter: { timestamp: "last_edited_time", last_edited_time: { on_or_after: desde } } } : {}),
+    });
+    out.push(...r.results.map(fila));
+    if (!r.has_more) break;
+    cursor = r.next_cursor;
+  }
+  return out;
+}
+
+// Escribe de vuelta lo que pasó en Veredicto: estado, hora agendada y tiempo registrado.
+export async function escribirFila(cfg, pageId, { etapa, agendar, minutos, ultima }, n = cliente(cfg)) {
+  const properties = {};
+  if (etapa) properties[P.etapa] = { select: { name: etapa } };
+  if (agendar !== undefined) properties[P.agendar] = { date: agendar ? { start: agendar.start, end: agendar.end || null } : null };
+  if (minutos != null) properties[P.min] = { number: Math.round(minutos) };
+  if (ultima) properties[P.ultima] = { date: { start: ultima } };
+  try { await n.pages.update({ page_id: pageId, properties }); }
+  catch (e) { if (e.status === 404) throw Object.assign(new Error("La fila ya no está en Notion."), { borrado: true }); throw e; }
+}
+
+export async function nuevaFila(cfg, texto, { tipo = "Idea", etapa = "Bandeja" } = {}, n = cliente(cfg)) {
+  const [primera, ...resto] = String(texto).trim().split(/\r?\n/);
+  const p = await n.pages.create({
+    parent: { database_id: cfg.flujo },
+    properties: { [P.nombre]: { title: [{ text: { content: primera.slice(0, 1900) } }] }, [P.tipo]: { select: { name: tipo } }, [P.etapa]: { select: { name: etapa } } },
+    children: resto.filter(Boolean).slice(0, 80).map((l) => ({ object: "block", type: "paragraph", paragraph: { rich_text: [{ type: "text", text: { content: l.slice(0, 1900) } }] } })),
+  });
+  return p.id;
+}

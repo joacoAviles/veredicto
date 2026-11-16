@@ -369,7 +369,15 @@ function vistaTareas() {
 function vistaGestiones() {
   const txt = h("textarea", { id: "nota", placeholder: "Una idea o un pendiente. La primera línea es el título." });
   const tipo = h("select", { id: "nota-tipo" }, h("option", { value: "captura" }, "Pendiente (casilla)"), h("option", { value: "nota" }, "Nota (sin casilla)"));
-  const gest = S.items.filter((i) => i.kind === "tarea" && i.fuente !== "app" && i.status !== "hecha");
+  const gest = S.items.filter((i) => i.kind === "tarea" && i.fuente !== "app" && !i.flujo && i.status !== "hecha");
+  const flujo = S.items.filter((i) => i.flujo && !["hecha", "archivada"].includes(i.status));
+  const ETAPAS = ["Bandeja", "Idea", "Por hacer", "Agendada", "En curso"];
+  const bloques = new Map(S.agenda.blocks.map((b) => [b.id, b]));
+  const filaFlujo = (i) => h("li", {},
+    h("button", { class: "icono", title: "Hecha", "aria-label": "Marcar hecha " + i.title, onclick: (e) => act(e.target, () => api(`/api/items/${i.id}`, { method: "PATCH", body: { status: "hecha" } }), "Hecha.") }, "☐"),
+    h("span", { class: "que" }, i.title, h("small", {}, [i.tipo_nota, `${i.est_min} min`, bloques.get(i.bloque_id) ? `hoy ${hora(bloques.get(i.bloque_id).start)}` : i.bloque_id ? "agendada" : i.due_date ? `para ${i.due_date}` : ""].filter(Boolean).join(" · "))),
+    ["Bandeja", "Idea"].includes(i.etapa) ? h("button", { title: "Pasar a «Por hacer»: Armar mi día le busca hueco", onclick: (e) => act(e.target, () => api(`/api/items/${i.id}`, { method: "PATCH", body: { agendable: true } }), "Por hacer: entra en el próximo «Armar mi día».") }, "Por hacer") : null,
+    h("button", { class: "icono", title: "Iniciar", "aria-label": "Iniciar " + i.title, onclick: (e) => iniciarPor({ item_id: i.id }, e.target) }, "▶"));
   const hechas = S.items.filter((i) => i.kind === "tarea" && i.fuente !== "app" && i.status === "hecha").slice(0, 20);
   const porNota = new Map();
   for (const g of gest) { const k = g.nota || "Sin nota"; if (!porNota.has(k)) porNota.set(k, []); porNota.get(k).push(g); }
@@ -389,6 +397,10 @@ function vistaGestiones() {
       h("div", { class: "crece" }, tipo),
       h("button", { class: "primario", onclick: (e) => { const t = txt.value.trim(); if (!t) return; act(e.target, async () => { await api("/api/capturas", { method: "POST", body: { text: t, kind: tipo.value } }); txt.value = ""; }, "Guardado."); } }, "Guardar")),
       destino ? null : h("p", { class: "suave" }, "Conecta tus notas (Ajustes → paso 3) y esto se escribe en tu Obsidian o Notion.")),
+    flujo.length ? h("section", { class: "tarjeta" },
+      h("div", { class: "fila" }, h("h2", { class: "crece" }, "Flujo en Notion"), h("button", { onclick: armar }, "Armar mi día")),
+      h("p", { class: "suave" }, "De idea a tiempo en el calendario: «Por hacer» entra solo en tus huecos libres y lo que registras suma en la fila de Notion."),
+      ...ETAPAS.map((et) => { const xs = flujo.filter((i) => (i.etapa || "Bandeja") === et); return xs.length ? h("div", {}, h("h3", { class: "etapa" }, `${et} · ${xs.length}`), h("ul", { class: "lista" }, xs.map(filaFlujo))) : null; })) : null,
     ...[...porNota].map(([nota, xs]) => h("section", { class: "tarjeta" }, h("h2", {}, `${nota} · ${xs.length}`), h("ul", { class: "lista" }, xs.map(fila)))),
     gest.length || !destino ? null : h("p", { class: "vacio" }, "Sin casillas abiertas en tus notas."),
     abiertas.length ? h("section", { class: "tarjeta" }, h("h2", {}, destino ? `Enviando a tus notas (${abiertas.length})` : `Bandeja (${abiertas.length})`), h("ul", { class: "lista" }, abiertas.map(filaCap))) : null,

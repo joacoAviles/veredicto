@@ -5,6 +5,7 @@
 Veredicto junta tus calendarios (Google, iCloud, Outlook, CalDAV) y tus notas (Obsidian o Notion) en una sola agenda, mide lo que realmente haces y te reclama cuando no estás registrando nada. Se instala como Immich: un `docker compose` en tu servidor. Lo único público es la herramienta; tus datos, tus cuentas y tu tema viven en tu carpeta `datos/` y nunca salen de ahí.
 
 - **Calendarios en ambos sentidos.** Lo que mueves en Veredicto aparece en tu teléfono y al revés, cada 2 minutos. Tus bloques van a un calendario propio, «Veredicto · Plan»; lo medido, opcionalmente, a «Veredicto · Registrado».
+- **De idea a calendario en Notion.** La base «Flujo» guarda ideas, videos y gestiones. Lo que pasas a «Por hacer» entra solo en tus huecos libres, la hora vuelve a Notion y lo que mides suma en su fila.
 - **Notas = gestiones.** Cada casilla `- [ ]` de tus notas es una gestión. Márcala en la app, en Obsidian o en Notion y queda marcada en todos lados. Lo que capturas con Siri o Android cae en una nota «Bandeja» del día.
 - **Registro de tiempo** con una sola actividad abierta a la vez, desde la web, Siri, Android o el reloj.
 - **Vigilante.** Si no registras nada, te avisa a los 10, 30 y 60 minutos y después cada 10. Si algo agendado empieza, te manda el botón para iniciarlo. Funciona por ntfy, Telegram o webhook, con textos editables.

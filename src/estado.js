@@ -72,6 +72,7 @@ export async function buildState(q, { tz, now = Date.now() }) {
       due_date: i.due_date ? new Date(i.due_date).toISOString().slice(0, 10) : null,
       hora: i.hora ? String(i.hora).slice(0, 5) : null, dias: i.dias,
       fuente: i.fuente, nota: i.nota_titulo || null, nota_ref: i.nota_ref || null,
+      flujo: i.nota_ref === "flujo", etapa: i.etapa || null, tipo_nota: i.tipo_nota || null, agendable: !!i.agendable, bloque_id: i.bloque_id || null,
     })),
     agenda,
     hoy: {
