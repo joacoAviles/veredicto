@@ -9,7 +9,10 @@ URL="https://github.com/$REPO/releases/latest/download"
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Falta $1. Instálalo y vuelve a correr."; exit 1; }; }
 need docker; need curl
-docker compose version >/dev/null 2>&1 || { echo "Falta Docker Compose v2 (docker compose)."; exit 1; }
+# Docker Compose v2: «docker compose» o, en Synology, «docker-compose».
+if docker compose version >/dev/null 2>&1; then DC="docker compose"
+elif docker-compose version 2>/dev/null | grep -qE "v?2\."; then DC="docker-compose"
+else echo "Falta Docker Compose v2. En Synology instala Container Manager."; exit 1; fi
 
 mkdir -p "$DIR" && cd "$DIR"
 [ -f compose.yaml ] && echo "Ya existe compose.yaml: lo actualizo." 
@@ -25,11 +28,11 @@ if [ ! -f .env ]; then
   chmod 600 .env
 fi
 mkdir -p datos/db datos/tema datos/notas datos/respaldos datos/clave
-docker compose pull
-docker compose up -d
+$DC pull
+$DC up -d
 echo
 echo "Listo. Abre http://localhost:$(grep -E '^PUERTO=' .env | cut -d= -f2) y pega el código de instalación:"
 sleep 5
-docker compose logs app 2>/dev/null | grep -A2 "Código de instalación" || echo "  docker compose logs app   (búscalo ahí en unos segundos)"
+$DC logs app 2>/dev/null | grep -A2 "Código de instalación" || echo "  $DC logs app   (búscalo ahí en unos segundos)"
 echo
 echo "Guarda una copia de .env: sin la CLAVE_CIFRADO no se pueden leer tus cuentas conectadas."

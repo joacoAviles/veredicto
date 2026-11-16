@@ -1,5 +1,8 @@
 # Cambios
 
+## v2.2.1
+- El instalador y la restauración funcionan con `docker-compose` de Synology (Container Manager) además de `docker compose`.
+
 ## v2.2.0 — versión final
 - Lo que cambias en la app sale a tus calendarios y notas en ~1 segundo; toda la sincronización corre en serie (sin dobles envíos).
 - Borrar un registro lo saca también de «Veredicto · Registrado».
