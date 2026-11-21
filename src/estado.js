@@ -72,6 +72,7 @@ export async function buildState(q, { tz, now = Date.now() }) {
     now, tz, day,
     current,
     proyectos: proyectos.rows, pilares: pilares.rows, demo: !!demo.rows[0].hay,
+    modulos: { infra: false, ...((await getSetting(q, "modulos", {})) || {}) },
     activitywatch: aw?.url ? { url: aw.url, activo: aw.activo !== false, ultimo_ok: aw.ultimo_ok || null, error: aw.error || "" } : null,
     items: items.rows.map((i) => ({
       id: i.id, kind: i.kind, title: i.title, status: i.status, est_min: i.est_min,
@@ -79,6 +80,8 @@ export async function buildState(q, { tz, now = Date.now() }) {
       hora: i.hora ? String(i.hora).slice(0, 5) : null, dias: i.dias,
       fuente: i.fuente, nota: i.nota_titulo || null, nota_ref: i.nota_ref || null,
       proyecto_id: i.proyecto_id || null, eisenhower: i.eisenhower || null, demo: !!i.demo,
+      prioridad: i.prioridad || null, asignado: i.asignado || "yo", carril: i.carril || "local", ventana: i.ventana || "dia",
+      agente_estado: i.agente_estado || null, agente: i.agente_por || null, cloud_ok: !!i.cloud_ok,
       flujo: i.nota_ref === "flujo", etapa: i.etapa || null, tipo_nota: i.tipo_nota || null, agendable: !!i.agendable, bloque_id: i.bloque_id || null,
     })),
     agenda,

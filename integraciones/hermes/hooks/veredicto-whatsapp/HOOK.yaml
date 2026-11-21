@@ -1,0 +1,4 @@
+name: veredicto-whatsapp
+description: WhatsApp primero. Cada vez que el asistente atiende un mensaje, Veredicto pausa el carril local para que el modelo quede libre.
+events:
+  - agent:start

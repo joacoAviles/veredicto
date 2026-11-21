@@ -11,6 +11,8 @@ Veredicto junta tus calendarios (Google, iCloud, Outlook, CalDAV) y tus notas (O
 - **Las 9 bases de Notion.** Pilares, Proyectos, Tareas, Ideas, Rutinas, Recurrencias, Calendario, Sesiones y Actividad: las crea o adopta tus «TimeMachine - …» e importa el historial.
 - **Tu computador.** Con ActivityWatch ve qué app tenías al frente y te deja registrar lo olvidado con un toque.
 - **Tu asistente.** Servidor MCP: Claude o Aurora pueden iniciar, parar, capturar, crear tareas y armar tu día.
+- **Carpeta sincronizada.** Tus tareas pendientes en un `.md` de tu computador (Mac, Linux o Windows), aunque Veredicto corra en el NAS. Marcas, renombras o agregas ahí y llega a Veredicto, y al revés.
+- **Infraestructura (opcional).** Si la activas en Ajustes → Módulos, aparece la pestaña Infra: una cola para agentes de IA (Hermes u otros) con urgencia, proyectos foco, carril local o cloud (este último solo con tu OK) y horario nocturno. Responder mensajes siempre va primero.
 - **Datos de ejemplo y bienvenida guiada** para recorrer todo antes de conectar nada.
 - **Registro de tiempo** con una sola actividad abierta a la vez, desde la web, Siri, Android o el reloj.
 - **Vigilante.** Si no registras nada, te avisa a los 10, 30 y 60 minutos y después cada 10. Si algo agendado empieza, te manda el botón para iniciarlo. Funciona por ntfy, Telegram o webhook, con textos editables.
@@ -61,6 +63,8 @@ Para que funcionen los botones de los avisos y la conexión con Google u Outlook
 | Tu computador (ActivityWatch) | [docs/activitywatch.md](docs/activitywatch.md) |
 | Dominio con Cloudflare Tunnel | [docs/tunel.md](docs/tunel.md) |
 | Tema, logo y voz de los avisos | [docs/tema.md](docs/tema.md) |
+| Carpeta sincronizada (Mac, Linux, Windows) | [docs/carpeta.md](docs/carpeta.md) |
+| Infraestructura: agentes de IA (Hermes, WhatsApp) | [docs/agentes.md](docs/agentes.md) |
 
 ## Dónde vive cada cosa
 
@@ -73,7 +77,7 @@ Para que funcionen los botones de los avisos y la conexión con Google u Outlook
 | Notas Markdown | `datos/notas/` o la carpeta que montes |
 | Respaldos diarios (03:00, se guardan 14) | `datos/respaldos/` |
 
-Los tokens de atajos solo sirven para las direcciones `/api/atajo/…`: si uno se filtra, no abre tus cuentas ni tus ajustes. La entrada se bloquea 15 minutos tras 8 contraseñas incorrectas.
+Cada token abre solo lo suyo (atajos y MCP, agentes, o la carpeta sincronizada): si uno se filtra, no abre tus cuentas ni tus ajustes. La entrada se bloquea 15 minutos tras 8 contraseñas incorrectas.
 
 No hay servidor central ni telemetría. Veredicto solo habla con tus propias cuentas y con el canal de avisos que elijas.
 

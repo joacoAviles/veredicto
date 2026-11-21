@@ -8,6 +8,7 @@ import { armarHoy, changed } from "./servicios.js";
 import * as proyectos from "./proyectos.js";
 import { resumen as resumenActividad } from "./sync/activitywatch.js";
 import { fmtDur, fmtHora, startOfDay, addDays, dayKey } from "./time.js";
+import * as agentes from "./agentes.js";
 
 const PROTOCOLOS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
@@ -39,6 +40,7 @@ export function mcpRouter(app, pool, { need, cfg }) {
   const timer = (fn) => tx(pool, async (q) => { await core.lockTimer(q); return fn(q); });
   const linea = (x) => `${fmtHora(x.start, cfg.tz)}–${fmtHora(x.end, cfg.tz)} ${x.title}`;
 
+  const extra = agentes.mcpRun(pool, { tz: cfg.tz, tx });
   const run = {
     async estado() {
       const s = await buildState(pool, { tz: cfg.tz });
@@ -151,13 +153,16 @@ export function mcpRouter(app, pool, { need, cfg }) {
       return responder(m.id, {
         protocolVersion: v, capabilities: { tools: { listChanged: false } },
         serverInfo: { name: "veredicto", title: cfg.nombre, version: cfg.version || "3" },
-        instructions: "Veredicto es el registro de tiempo y la agenda personal del usuario. Usa «estado» para saber qué hace ahora, «iniciar»/«parar» para medir, «capturar» para guardar ideas y «armar_dia» para planificar. Las horas están en " + cfg.tz + ".",
+        instructions: "Veredicto es el registro de tiempo y la agenda personal del usuario. Usa «estado» para saber qué hace ahora, «disponibilidad» antes de responder mensajes por él, «iniciar»/«parar» para medir, «capturar» para guardar ideas y «armar_dia» para planificar. Las horas están en " + cfg.tz + ".",
       });
     }
     if (m.method === "ping") return responder(m.id, {});
-    if (m.method === "tools/list") return responder(m.id, { tools: TOOLS });
+    const infra = (await agentes.modulos(pool)).infra;
+    if (m.method === "tools/list") return responder(m.id, { tools: [...TOOLS, ...agentes.MCP_SIEMPRE, ...(infra ? agentes.MCP_AGENTES : [])] });
     if (m.method === "tools/call") {
-      const fn = run[m.params?.name];
+      const nombre = m.params?.name;
+      const deAgentes = agentes.MCP_AGENTES.some((t) => t.name === nombre);
+      const fn = (Object.hasOwn(run, nombre) && run[nombre]) || ((!deAgentes || infra) && Object.hasOwn(extra, nombre) && extra[nombre]);
       if (!fn) return error(m.id, -32602, `Herramienta desconocida: ${m.params?.name}`);
       try {
         const text = await fn(m.params?.arguments || {});

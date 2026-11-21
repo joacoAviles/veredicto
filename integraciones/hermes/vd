@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+"""vd — Veredicto desde la terminal (para Hermes u otro agente, y para ti).
+
+Lee VEREDICTO_URL y VEREDICTO_TOKEN del entorno o de ~/.hermes/.env.
+El token debe ser de alcance «agente» (Veredicto → Infra → Agentes y conexión).
+
+  vd contexto [--json]            ¿Estoy ocupado? qué viene, mis pendientes, qué espera mi OK
+  vd agenda [DIAS]                agenda de hoy (o N días)
+  vd tareas [mias|agente|revision|cola|bloqueada] [--proyecto P]
+  vd anotar "TÍTULO" [--proyecto P] [--eisenhower "Hacer ya|Agendar|Delegar|Eliminar"] [--vence AAAA-MM-DD]   tarea para ti
+  vd delegar "TÍTULO" [--proyecto P] [--prioridad 1-4] [--noche] [--cloud] [--detalle TXT] [--vence F]
+  vd aprobar ID                   marca hecha una tarea en revisión
+  vd corregir ID "NOTA"           la devuelve a la cola con tu corrección
+  vd estado ID ESTADO ["NOTA"]    cola | revision | bloqueada | aprobada | rechazada
+  vd cloud-ok ID "RESPUESTA TEXTUAL DEL DUEÑO"
+  vd bloque "TÍTULO" INICIO FIN   agenda un bloque (ISO 8601 o "HH:MM" de hoy)
+  vd capturar "TEXTO"             a la bandeja de Veredicto
+  vd conversando [MIN]            pausa el carril local (WhatsApp primero)
+  vd siguiente [local|cloud] [--agente NOMBRE]
+  vd latido NOMBRE [--carril C] [--modelo M] [--maquina X] [--estado TXT] [--item ID]
+
+Los IDs se pueden abreviar a los primeros 6+ caracteres.
+"""
+import json, os, sys, urllib.request, urllib.error, urllib.parse, datetime, socket
+
+
+def env():
+    v = {}
+    p = os.path.expanduser(os.environ.get("HERMES_HOME", "~/.hermes")) + "/.env"
+    if os.path.exists(p):
+        for line in open(p, encoding="utf-8"):
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, _, val = line.partition("=")
+                v[k.strip()] = val.strip().strip('"').strip("'")
+    url = os.environ.get("VEREDICTO_URL") or v.get("VEREDICTO_URL")
+    tok = os.environ.get("VEREDICTO_TOKEN") or v.get("VEREDICTO_TOKEN")
+    if not url or not tok:
+        sys.exit("Falta VEREDICTO_URL o VEREDICTO_TOKEN en ~/.hermes/.env")
+    return url.rstrip("/"), tok
+
+
+def api(method, path, body=None):
+    url, tok = env()
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url + path, data=data, method=method, headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            raw = r.read().decode()
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as e:
+        try:
+            msg = json.loads(e.read().decode()).get("error")
+        except Exception:
+            msg = str(e)
+        sys.exit(f"Veredicto: {msg}")
+    except urllib.error.URLError as e:
+        sys.exit(f"No pude conectar con Veredicto ({url}): {e.reason}")
+
+
+def opts(args, flags=()):
+    """Separa --clave valor y --bandera del resto."""
+    o, rest, i = {}, [], 0
+    while i < len(args):
+        a = args[i]
+        if a.startswith("--"):
+            k = a[2:]
+            if k in flags:
+                o[k] = True
+            else:
+                o[k] = args[i + 1] if i + 1 < len(args) else ""
+                i += 1
+        else:
+            rest.append(a)
+        i += 1
+    return o, rest
+
+
+def hora(ms):
+    return datetime.datetime.fromtimestamp(ms / 1000).strftime("%H:%M")
+
+
+def fila(t):
+    meta = [t.get("proyecto"), t.get("eisenhower") if t.get("asignado") != "agente" else None, f"P{t['prioridad']}" if t.get("prioridad") else None,
+            t.get("estado") if t.get("asignado") == "agente" else None,
+            "cloud" if t.get("carril") == "cloud" else None, "noche" if t.get("ventana") == "noche" else None,
+            f"vence {t['due_date']}" if t.get("due_date") else None]
+    return f"[{t['id'][:8]}] {t['title']}" + (f"  ({' · '.join(m for m in meta if m)})" if any(meta) else "")
+
+
+def resolver(pref):
+    if len(pref) >= 32:
+        return pref
+    xs = [t for t in api("GET", "/api/agente/tareas?limite=200") + api("GET", "/api/agente/tareas?estado=revision,aprobada,rechazada,bloqueada&limite=200") if t["id"].startswith(pref)]
+    ids = {t["id"] for t in xs}
+    if len(ids) != 1:
+        sys.exit(f"ID «{pref}» {'no existe' if not ids else 'es ambiguo'}.")
+    return ids.pop()
+
+
+def a_iso(s):
+    if len(s) == 5 and s[2] == ":":
+        h, m = map(int, s.split(":"))
+        return datetime.datetime.now().astimezone().replace(hour=h, minute=m, second=0, microsecond=0).isoformat()
+    return s
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help", "ayuda"):
+        print(__doc__.strip()); return
+    cmd, args = argv[0], argv[1:]
+    if cmd == "contexto":
+        c = api("GET", "/api/agente/contexto")
+        print(json.dumps(c, ensure_ascii=False, indent=1) if "--json" in args else c["texto"])
+    elif cmd == "agenda":
+        dias = args[0] if args else "1"
+        xs = api("GET", f"/api/agente/agenda?dias={dias}")
+        print("\n".join(f"{x['dia']} {x['hora'] or 'todo el día'}  {x['title']}" + (f"  · {x['calendario']}" if x.get("calendario") else "") for x in xs) or "Nada agendado.")
+    elif cmd == "tareas":
+        o, rest = opts(args)
+        tipo = rest[0] if rest else "mias"
+        q = {"mias": "asignado=yo", "agente": "asignado=agente", "revision": "estado=revision", "cola": "estado=cola", "bloqueada": "estado=bloqueada"}.get(tipo, "asignado=yo")
+        if o.get("proyecto"):
+            q += "&proyecto=" + urllib.parse.quote(o["proyecto"])
+        xs = api("GET", f"/api/agente/tareas?{q}&limite=30")
+        print("\n".join(fila(t) for t in xs) or "Nada.")
+    elif cmd in ("anotar", "delegar"):
+        o, rest = opts(args, flags=("noche", "cloud"))
+        if not rest:
+            sys.exit(f'Uso: vd {cmd} "TÍTULO" …')
+        body = {"title": rest[0], "asignado": "agente" if cmd == "delegar" else "yo"}
+        if o.get("proyecto"): body["proyecto"] = o["proyecto"]
+        if o.get("prioridad"): body["prioridad"] = int(o["prioridad"])
+        if o.get("eisenhower"): body["eisenhower"] = o["eisenhower"]
+        if o.get("vence"): body["due_date"] = o["vence"]
+        if o.get("detalle"): body["detalle"] = o["detalle"]
+        if o.get("noche"): body["ventana"] = "noche"
+        if o.get("cloud"): body["carril"] = "cloud"
+        t = api("POST", "/api/agente/tareas", body)["tarea"]
+        print(("Delegada: " if cmd == "delegar" else "Anotada: ") + fila(t) + ("\nOjo: cloud necesita tu OK explícito antes de correr." if o.get("cloud") else ""))
+    elif cmd == "aprobar":
+        print("Aprobada: " + fila(api("PATCH", f"/api/agente/tareas/{resolver(args[0])}", {"estado": "aprobada"})["tarea"]))
+    elif cmd == "corregir":
+        tid = resolver(args[0]); nota = " ".join(args[1:])
+        t = api("GET", "/api/agente/tareas?estado=revision,bloqueada,rechazada,cola&limite=200")
+        det = next((x["detalle"] for x in t if x["id"] == tid), "")
+        print("A la cola con tu corrección: " + fila(api("PATCH", f"/api/agente/tareas/{tid}", {"estado": "cola", "nota": nota, "detalle": (det + "\nCorrección: " + nota).strip()})["tarea"]))
+    elif cmd == "estado":
+        print(fila(api("PATCH", f"/api/agente/tareas/{resolver(args[0])}", {"estado": args[1], "nota": " ".join(args[2:])})["tarea"]))
+    elif cmd == "cloud-ok":
+        if len(args) < 2:
+            sys.exit('Uso: vd cloud-ok ID "lo que respondió el dueño"')
+        print("Cloud aprobado: " + fila(api("PATCH", f"/api/agente/tareas/{resolver(args[0])}", {"cloud_ok": True, "confirmado_por": " ".join(args[1:])})["tarea"]))
+    elif cmd == "bloque":
+        b = api("POST", "/api/agente/bloques", {"title": args[0], "inicio": a_iso(args[1]), "fin": a_iso(args[2])})["bloque"]
+        print(f"Agendado {hora(b['start'])}–{hora(b['end'])} {b['title']}")
+    elif cmd == "capturar":
+        api("POST", "/api/agente/capturar", {"texto": " ".join(args)}); print("Guardado en la bandeja.")
+    elif cmd == "conversando":
+        r = api("POST", "/api/agente/conversando", {"minutos": float(args[0])} if args else {})
+        print(f"Carril local en pausa hasta las {hora(r['hasta'])}.")
+    elif cmd == "siguiente":
+        o, rest = opts(args)
+        print(json.dumps(api("POST", "/api/agente/siguiente", {"carril": rest[0] if rest else "local", "agente": o.get("agente", "")}), ensure_ascii=False))
+    elif cmd == "latido":
+        o, rest = opts(args)
+        api("POST", "/api/agente/latido", {"agente": rest[0] if rest else socket.gethostname(), "carril": o.get("carril", "local"), "modelo": o.get("modelo", ""), "maquina": o.get("maquina", socket.gethostname()), "estado": o.get("estado", ""), "item_id": o.get("item")})
+    else:
+        sys.exit(f"Comando desconocido: {cmd}. Usa: vd ayuda")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

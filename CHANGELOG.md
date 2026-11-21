@@ -1,5 +1,13 @@
 # Cambios
 
+## v3.1.0
+- **Carpeta sincronizada**: tus tareas pendientes en un `.md` local (macOS, Linux, Windows), en ambos sentidos. Marcar, renombrar y crear desde el archivo, con proyecto (`## Proyecto`), fecha (`📅`) y Eisenhower (`[Hacer ya]`). Cliente sin dependencias en `integraciones/carpeta/` con `configurar` e `instalar` (launchd, systemd o el Programador de tareas). Tokens `jdc_…` que solo abren `/api/carpeta/…`.
+- **Infraestructura (opcional, apagada por defecto)**: se activa en Ajustes → Módulos y agrega la pestaña Infra con las hojas «Tablero de agentes» y «Agentes y conexión». Es una cola de tareas para agentes de IA dentro de tus proyectos, con urgencia P1–P4, proyectos foco, carril local/cloud (cloud solo con tu OK) y ventana nocturna. Corre una tarea a la vez por carril y las abandonadas vuelven solas a la cola. Delegar marca «Delegar» en Eisenhower. Botón 🤖 en Tareas.
+- **Mensajes primero**: mientras tu asistente conversa, el carril local no entrega tareas.
+- **MCP**: nueva herramienta `disponibilidad` y, con Infraestructura, `delegar`, `cola_agentes`, `aprobar_agente`, `corregir_agente` y `autorizar_cloud`.
+- **Tokens por alcance**: atajo (`jdt_`, atajos y MCP), agente (`jdg_`, `/api/agente` y MCP) y carpeta (`jdc_`). Ajustes muestra los tokens activos y permite revocarlos.
+- **Hermes Agent** en `integraciones/hermes/`: servidor MCP, skills, hook de mensajería, trabajadores (launchd o systemd), comando `vd`, avisos sin IA e instalador con nombre, modelo, carpeta y canal configurables.
+
 ## v3.0.0
 - **Proyectos y pilares** (como el Juez del Tiempo): tareas agrupadas, minutos medidos y de la semana, fecha límite, avance contra lo planificado y Eisenhower.
 - **Las 9 bases de Notion**: crea las «Veredicto · …» o adopta tus «TimeMachine - …» e importa su historial; se mantienen al día solas. Flujo gana la columna Proyecto. Página guía con plantillas.

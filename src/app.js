@@ -26,6 +26,8 @@ import * as espejo from "./sync/espejo.js";
 import * as aw from "./sync/activitywatch.js";
 import * as demo from "./demo.js";
 import { mcpRouter } from "./mcp.js";
+import * as agentes from "./agentes.js";
+import * as carpeta from "./carpeta.js";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const exists = (p) => access(p).then(() => true, () => false);
@@ -64,8 +66,15 @@ export function createApp(pool, opts = {}) {
   const need = wrap(async (req, res, next) => {
     const who = await auth.identify(pool, req);
     if (!who) return res.status(401).json({ error: "Inicia sesión." });
-    // Un token de atajo solo sirve para los atajos: si se filtra, no abre tus cuentas ni tus ajustes.
-    if (who.via === "token" && !req.path.startsWith("/api/atajo/") && req.path !== "/mcp") return res.status(403).json({ error: "Este token solo sirve para atajos y para tu asistente (MCP)." });
+    // Cada token abre solo lo suyo: si se filtra, no abre tus cuentas ni tus ajustes.
+    //   atajo   (Siri, reloj, asistente MCP) → /api/atajo/… y /mcp
+    //   agente  (Hermes u otro agente)       → /api/agente/… y /mcp
+    //   carpeta (carpeta sincronizada)       → /api/carpeta/…
+    if (who.via === "token") {
+      const ruta = req.originalUrl.split("?")[0];
+      const ok = { atajo: ruta.startsWith("/api/atajo/") || ruta === "/mcp", agente: ruta.startsWith("/api/agente/") || ruta === "/mcp", carpeta: ruta.startsWith("/api/carpeta/") }[who.alcance || "atajo"];
+      if (!ok) return res.status(403).json({ error: { atajo: "Este token solo sirve para atajos y para tu asistente (MCP).", agente: "Este token solo sirve para agentes (y MCP).", carpeta: "Este token solo sirve para la carpeta sincronizada." }[who.alcance || "atajo"] });
+    }
     req.who = who;
     next();
   });
@@ -482,7 +491,7 @@ export function createApp(pool, opts = {}) {
       },
       sugerido_ntfy: "veredicto-" + randomBytes(9).toString("hex"),
       vigilante: await getSetting(pool, "vigilante", {}),
-      tokens: (await pool.query("SELECT count(*)::int n FROM api_tokens")).rows[0].n,
+      tokens: (await pool.query("SELECT count(*)::int n FROM api_tokens WHERE alcance='atajo'")).rows[0].n,
     });
   }));
   app.put("/api/avisos", need, wrap(async (req, res) => {
@@ -718,11 +727,18 @@ export function createApp(pool, opts = {}) {
   mcpRouter(app, pool, { need, cfg });
 
   // ---------- Tokens para atajos ----------
-  app.get("/api/tokens", need, wrap(async (req, res) => res.json((await pool.query("SELECT id,label,created_at,last_used_at FROM api_tokens ORDER BY created_at DESC")).rows)));
+  app.get("/api/tokens", need, wrap(async (req, res) => res.json((await pool.query("SELECT id,label,alcance,created_at,last_used_at FROM api_tokens ORDER BY created_at DESC")).rows)));
   app.post("/api/tokens", need, wrap(async (req, res) => {
     if (req.who.via !== "cookie") throw new core.HttpError(403, "Crea tokens desde la app.");
-    res.json({ ...(await auth.newApiToken(pool, req.body.label)), base: cfg.publicUrl.replace(/\/$/, "") });
+    if (req.body.alcance === "agente" && !(await agentes.modulos(pool)).infra) throw new core.HttpError(400, "Activa la Infraestructura en Ajustes → Módulos para crear tokens de agente.");
+    res.json({ ...(await auth.newApiToken(pool, req.body.label, req.body.alcance)), base: cfg.publicUrl.replace(/\/$/, "") });
   }));
+
+  // ---------- Infraestructura (opcional): agentes de IA ----------
+  agentes.rutas(app, { pool, tx, need, wrap, done, changed, tz: cfg.tz });
+
+  // ---------- Carpeta sincronizada: tus pendientes en un .md de cualquier computador ----------
+  carpeta.rutas(app, { pool, tx, need, wrap, changed, empujar: empujarPronto });
   app.delete("/api/tokens/:id", need, wrap(async (req, res) => { await pool.query("DELETE FROM api_tokens WHERE id=$1", [req.params.id]); res.json({ ok: true }); }));
 
   // ---------- Atajos (Siri, Android, Garmin): respuestas en texto simple ----------

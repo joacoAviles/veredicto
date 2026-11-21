@@ -5,6 +5,7 @@ Veredicto es un servidor MCP en `https://TU-DOMINIO/mcp` (transporte HTTP). Tu a
 | Herramienta | Qué hace |
 |---|---|
 | `estado` | Qué corre ahora, cuánto llevas hoy y lo que viene |
+| `disponibilidad` | Si estás ocupado ahora y hasta cuándo (para responder mensajes por ti) |
 | `iniciar` | Inicia algo (opcional: en un proyecto) |
 | `parar`, `pausar`, `seguir` | El temporizador |
 | `capturar` | Idea o nota a la bandeja (Notion/Obsidian) |
@@ -14,9 +15,10 @@ Veredicto es un servidor MCP en `https://TU-DOMINIO/mcp` (transporte HTTP). Tu a
 | `agendar`, `armar_dia` | Bloques en tu calendario «Plan» |
 | `registro` | Tiempo por proyecto en los últimos días |
 | `actividad_computador` | Lo que vio ActivityWatch y lo sin registrar |
+| `delegar`, `cola_agentes`, `aprobar_agente`, `corregir_agente`, `autorizar_cloud` | La cola de agentes; solo con el módulo Infraestructura encendido (ver [agentes.md](agentes.md)) |
 
 ## 1. Crea el token
-Ajustes → paso 6 → «Crear token del asistente». Ese token solo abre `/mcp` y los atajos: no ve tus cuentas ni tus ajustes.
+Ajustes → paso 6 → «Crear token del asistente». Ese token solo abre `/mcp` y los atajos: no ve tus cuentas ni tus ajustes. Un token de agente (Infra → Agentes y conexión) también sirve para `/mcp`.
 
 ## 2. Conéctalo
 
@@ -27,7 +29,16 @@ Ajustes → paso 6 → «Crear token del asistente». Ese token solo abre `/mcp`
 claude mcp add --transport http veredicto https://TU-DOMINIO/mcp --header "Authorization: Bearer TU_TOKEN"
 ```
 
-**Programas con archivo de configuración (Cursor, Aurora, etc.):**
+**Hermes Agent** (en `~/.hermes/config.yaml`; `integraciones/hermes/instalar.sh` lo agrega solo):
+```yaml
+mcp_servers:
+  veredicto:
+    url: "${VEREDICTO_URL}/mcp"
+    headers:
+      Authorization: "Bearer ${VEREDICTO_TOKEN}"
+```
+
+**Programas con archivo de configuración (Cursor, etc.):**
 ```json
 { "mcpServers": { "veredicto": { "command": "npx", "args": ["-y", "mcp-remote", "https://TU-DOMINIO/mcp", "--header", "Authorization: Bearer TU_TOKEN"] } } }
 ```
