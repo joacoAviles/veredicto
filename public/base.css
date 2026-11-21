@@ -178,3 +178,15 @@ body.en-bienvenida { padding-bottom: 1.5rem; }
   .cabeza-paso .rasgo-icono.grande { width: 2.8rem; height: 2.8rem; font-size: 1.5rem; }
 }
 .tramo { cursor: pointer; }
+
+/* Infraestructura (opcional): tablero de agentes */
+.acciones { flex-wrap: wrap; margin-top: .5rem; }
+.acciones:empty { display: none; }
+.acciones button { padding: .45em .9em; }
+pre.resultado { white-space: pre-wrap; max-height: 40vh; overflow: auto; font-size: .8rem; }
+a.chip { text-decoration: none; color: inherit; border: 1px solid var(--linea); display: inline-flex; align-items: center; }
+.lista li.tarea-agente { align-items: flex-start; }
+.lista li.tarea-agente > select { flex: none; width: auto; min-width: 4.5em; }
+input.interruptor { width: auto; flex: none; transform: scale(1.4); margin: 0 .4rem; accent-color: var(--acento); }
+code.codigo { white-space: pre-wrap; }
+@media (max-width: 440px) { .pestanas a { font-size: .74rem; padding-left: 0; padding-right: 0; } }

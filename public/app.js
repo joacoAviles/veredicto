@@ -70,6 +70,7 @@ async function refrescar() {
       if (location.hash.startsWith("#proyectos")) PJ = null;
       if (location.hash.startsWith("#registro")) { registro = null; AWD = null; }
       if (location.hash.startsWith("#bienvenida")) { cuentasCfg = null; return; }
+      if (location.hash.startsWith("#infra")) INF = null;
       if (location.hash.startsWith("#ajustes")) cuentasCfg = null; else render();
     } catch {}
   }, 120);
@@ -115,8 +116,12 @@ function render() {
   document.body.classList.toggle("en-bienvenida", asistente);
   const tab = { tareas: "gestiones", bandeja: "gestiones" }[v] || v;
   for (const a of document.querySelectorAll("#nav a")) a.classList.toggle("activa", a.dataset.v === tab);
+  // Infraestructura es opcional: sin el módulo encendido no aparece ni se puede abrir.
+  const infraOn = !!S?.modulos?.infra;
+  $("#nav a[data-v=infra]").hidden = !infraOn;
+  if (v === "infra" && !infraOn) { location.replace("#ajustes"); return; }
   const foco = document.activeElement?.id, val = foco && document.activeElement.value;
-  const vistas = { hoy: vistaHoy, agenda: vistaAgenda, proyectos: vistaProyectos, gestiones: vistaGestiones, tareas: vistaTareas, bandeja: vistaGestiones, registro: vistaRegistro, ajustes: vistaAjustes, bienvenida: () => vistaBienvenida(Number(sub) || 0) };
+  const vistas = { hoy: vistaHoy, agenda: vistaAgenda, proyectos: vistaProyectos, gestiones: vistaGestiones, tareas: vistaTareas, bandeja: vistaGestiones, registro: vistaRegistro, ajustes: vistaAjustes, infra: vistaInfra, bienvenida: () => vistaBienvenida(Number(sub) || 0) };
   const sub_ = { "ajustes/avisos": vistaPlantillas, "ajustes/algoritmo": vistaAlgoritmo }[`${v}/${sub}`];
   const contenido = [].concat((sub_ || vistas[v] || vistaHoy)()).filter(Boolean);
   vista.replaceChildren(...(S?.demo && !asistente ? [bandaDemo()] : []), ...contenido);
@@ -334,7 +339,7 @@ function resumenTramos(tramos) {
 
 // ---------- Tareas y rutinas ----------
 function vistaTareas() {
-  const tareas = S.items.filter((i) => i.kind === "tarea" && i.fuente === "app");
+  const tareas = S.items.filter((i) => i.kind === "tarea" && i.fuente === "app" && i.asignado !== "agente");
   const rutinas = S.items.filter((i) => i.kind === "rutina");
   const fila = (i) => h("li", { class: i.status === "hecha" ? "hecha" : "" },
     h("button", { class: "icono", title: "Iniciar", "aria-label": "Iniciar " + i.title, onclick: (e) => iniciarPor({ item_id: i.id }, e.target) }, "▶"),
@@ -342,6 +347,7 @@ function vistaTareas() {
       i.kind === "rutina" && i.hora ? `${i.hora}${i.dias ? " · " + i.dias.map((d) => DIAS[d]).join(" ") : " · todos los días"}` : "",
       nombreProyecto(i.proyecto_id), i.eisenhower || "", i.due_date ? `vence ${i.due_date}` : "", i.status === "en curso" ? "en curso" : "", `${i.est_min} min`,
     ].filter(Boolean).join(" · "))),
+    S.modulos?.infra && i.kind === "tarea" && i.status !== "hecha" ? h("button", { class: "icono", title: "Delegar a un agente", "aria-label": "Delegar " + i.title, onclick: (e) => act(e.target, () => api(`/api/agente/tareas/${i.id}`, { method: "PATCH", body: { asignado: "agente" } }), "En la cola de agentes (Infra).") }, "🤖") : null,
     i.kind === "tarea" ? h("button", { class: "icono", title: i.status === "hecha" ? "Reabrir" : "Hecha", "aria-label": "Marcar hecha", onclick: (e) => act(e.target, () => api(`/api/items/${i.id}`, { method: "PATCH", body: { status: i.status === "hecha" ? "pendiente" : "hecha" } })) }, i.status === "hecha" ? "↺" : "✓") : null,
     h("button", { class: "icono", title: "Archivar", "aria-label": "Archivar", onclick: (e) => act(e.target, () => api(`/api/items/${i.id}`, { method: "PATCH", body: { status: "archivada" } }), "Archivada.") }, "✕"));
 
@@ -486,6 +492,13 @@ function vistaAjustes() {
       S.demo ? h("button", { class: "peligro", onclick: (e) => act(e.target, async () => { await api("/api/demo", { method: "DELETE" }); PJ = null; registro = null; AWD = null; }, "Ejemplo borrado.") }, "Borrar datos de ejemplo")
         : h("button", { onclick: (e) => act(e.target, async () => { await api("/api/demo", { method: "POST" }); PJ = null; registro = null; AWD = null; }, "Ejemplo cargado.") }, "Cargar datos de ejemplo")),
     tarjetaSync(),
+    tarjetaCarpeta(),
+    tarjetaTokens(),
+    h("section", { class: "tarjeta" }, h("h3", {}, "Módulos"),
+      h("ul", { class: "lista" },
+        h("li", {}, h("label", { class: "que", for: "mod-infra" }, h("b", {}, "Infraestructura y agentes de IA"),
+          h("small", {}, "Agrega la pestaña Infra: una cola de tareas para agentes (Hermes u otros) con urgencia, carril local o cloud y tu aprobación. Apagado no cambia nada más.")),
+          h("input", { id: "mod-infra", type: "checkbox", class: "interruptor", checked: !!S.modulos?.infra, onchange: (e) => act(e.target, () => api("/api/modulos", { method: "PUT", body: { infra: e.target.checked } }), e.target.checked ? "Infraestructura activada: mira la pestaña Infra." : "Infraestructura apagada.") })))),
     h("section", { class: "tarjeta" }, h("h3", {}, "Personalizar"),
       h("ul", { class: "lista" },
         h("li", {}, h("a", { class: "que", href: "#ajustes/avisos" }, "Avisos: textos, sonido y botones", h("small", {}, "Qué dice cada aviso y qué botones trae")), h("span", {}, "›")),
@@ -497,6 +510,36 @@ function vistaAjustes() {
       h("p", { class: "suave" }, "Los colores, letras y logo vienen de una plantilla. Para personalizarla sin tocar el código, pon tu tema.css (y si quieres, letras e íconos) en la carpeta datos/tema de tu servidor."),
       h("button", { onclick: (e) => act(e.target, async () => { await api("/api/salir", { method: "POST" }); sesion.dentro = false; }) }, "Cerrar sesión")),
   ];
+}
+
+// ---------- Tokens activos (atajos, carpetas, agentes): revocar uno no afecta a los demás ----------
+let tokensLista = null;
+function tarjetaTokens() {
+  if (!tokensLista) { api("/api/tokens").then((r) => { tokensLista = r; render(); }).catch(() => {}); return null; }
+  if (!tokensLista.length) return null;
+  const TIPO = { atajo: "Atajo", carpeta: "Carpeta", agente: "Agente" };
+  return h("section", { class: "tarjeta" }, h("details", {}, h("summary", {}, `Tokens activos (${tokensLista.length})`),
+    h("ul", { class: "lista" }, tokensLista.map((t) => h("li", {},
+      h("span", { class: "que" }, t.label, h("small", {}, [TIPO[t.alcance] || t.alcance, t.last_used_at ? `usado ${new Date(t.last_used_at).toLocaleString("es-CL")}` : "sin usar"].join(" · "))),
+      h("button", { class: "icono peligro", title: "Revocar", "aria-label": "Revocar " + t.label, onclick: (e) => { if (confirm(`¿Revocar «${t.label}»?`)) act(e.target, async () => { await api(`/api/tokens/${t.id}`, { method: "DELETE" }); tokensLista = null; }, "Revocado."); } }, "✕"))))));
+}
+
+// ---------- Carpeta sincronizada: tus pendientes en un .md de tu computador ----------
+let tokenCarpeta = null;
+function tarjetaCarpeta() {
+  const base = tokenCarpeta?.base || location.origin;
+  const script = "https://raw.githubusercontent.com/joacoAviles/veredicto/main/integraciones/carpeta/veredicto-carpeta.py";
+  return h("section", { class: "tarjeta" }, h("h3", {}, "Carpeta sincronizada"),
+    h("p", { class: "suave" }, "Tus tareas pendientes en un archivo Markdown de tu computador (Pendientes.md o uno por proyecto). Marca [x] para terminar, edita para renombrar o agrega «- [ ] algo» para crear: se sincroniza en ambos sentidos cada 2 minutos. Sirve con Obsidian, VS Code o cualquier editor."),
+    tokenCarpeta ? h("div", {},
+      h("p", {}, h("b", {}, "En tu computador (necesita Python 3), copia y pega:")),
+      h("code", { class: "codigo" }, `curl -fsSLo veredicto-carpeta.py ${script}
+python3 veredicto-carpeta.py configurar --url ${base} --token ${tokenCarpeta.token} --carpeta ~/Tareas
+python3 veredicto-carpeta.py instalar`),
+      h("p", { class: "suave" }, "Agrega --por-proyecto a «configurar» para tener un archivo por proyecto. El token no se vuelve a mostrar; solo abre la carpeta sincronizada."),
+      h("button", { onclick: () => { tokenCarpeta = null; render(); } }, "Listo"))
+      : h("div", { class: "fila" }, h("input", { id: "tok-carpeta", class: "crece", placeholder: "MacBook, PC oficina…" }),
+        h("button", { class: "primario", onclick: (e) => act(e.target, async () => { tokenCarpeta = await api("/api/tokens", { method: "POST", body: { label: $("#tok-carpeta").value || "Carpeta", alcance: "carpeta" } }); tokensLista = null; }) }, "Crear token")));
 }
 
 function pasoAvisos() {
@@ -1008,7 +1051,7 @@ function pasoAsistente() {
   const mcp = `${base}/mcp`;
   return [
     h("p", { class: "suave" }, "Veredicto es un servidor MCP: tu asistente puede preguntarle qué estás haciendo, iniciar y parar, capturar ideas, crear tareas en un proyecto, agendar y armar tu día. «Oye Claude, inicia edición del video en Canal de YouTube»."),
-    h("p", { class: "suave" }, "Herramientas: estado, iniciar, parar, pausar, seguir, capturar, agenda, proyectos, tareas, crear_tarea, completar_tarea, agendar, armar_dia, registro y actividad_computador."),
+    h("p", { class: "suave" }, "Herramientas: estado, disponibilidad, iniciar, parar, pausar, seguir, capturar, agenda, proyectos, tareas, crear_tarea, completar_tarea, agendar, armar_dia, registro y actividad_computador", S.modulos?.infra ? "; y con Infraestructura: delegar, cola_agentes, aprobar_agente, corregir_agente y autorizar_cloud." : "."),
     t ? h("div", {},
       h("p", {}, h("b", {}, "Token del asistente (cópialo ahora, no se vuelve a mostrar):")), h("code", { class: "codigo" }, t),
       h("details", { open: true }, h("summary", {}, "Claude (app de escritorio y web)"),
@@ -1021,7 +1064,7 @@ function pasoAsistente() {
         h("code", { class: "codigo" }, JSON.stringify({ mcpServers: { veredicto: { command: "npx", args: ["-y", "mcp-remote", mcp, "--header", `Authorization: Bearer ${t}`] } } }, null, 2)),
         h("p", { class: "suave" }, "Si el programa acepta servidores HTTP directo: URL ", h("code", {}, mcp), " con encabezado Authorization: Bearer y tu token.")),
       h("p", { class: "suave" }, "Este token solo sirve para el asistente y los atajos: no abre tus cuentas ni tus ajustes. Puedes revocarlo borrándolo."))
-      : h("button", { class: "primario", onclick: (e) => act(e.target, async () => { tokenMcp = await api("/api/tokens", { method: "POST", body: { label: "Asistente (MCP)" } }); avisosCfg && (avisosCfg.tokens = (avisosCfg.tokens || 0) + 1); }) }, "Crear token del asistente"),
+      : h("button", { class: "primario", onclick: (e) => act(e.target, async () => { tokenMcp = await api("/api/tokens", { method: "POST", body: { label: "Asistente (MCP)" } }); tokensLista = null; avisosCfg && (avisosCfg.tokens = (avisosCfg.tokens || 0) + 1); }) }, "Crear token del asistente"),
   ];
 }
 
@@ -1048,5 +1091,131 @@ function basesNotion(c) {
       h("b", {}, imp.estado === "corriendo" ? "Importando… " : imp.estado === "listo" ? "Importación lista. " : "La importación falló. "),
       imp.estado === "listo" ? Object.entries(imp.resultado || {}).filter(([, n]) => n).map(([k, n]) => `${n} ${k}`).join(" · ") : imp.estado === "error" ? imp.error : (imp.log || []).slice(-1)[0] || "empezando") : null);
 }
+
+// ---------- Infraestructura: hojas (tablero de agentes, agentes y conexión) ----------
+let INF = null, INFcola = null, tokenAgente = null;
+const borrador = { title: "", proyecto_id: "", prioridad: "3", carril: "local", ventana: "dia", detalle: "" };
+const ESTADO_TXT = { cola: "En cola", trabajando: "Trabajando", revision: "Espera tu OK", bloqueada: "Bloqueada", aprobada: "Aprobada", rechazada: "Rechazada" };
+const P_TXT = { 1: "P1 · urgente", 2: "P2 · importante", 3: "P3 · normal", 4: "P4 · cuando se pueda" };
+const haceTxt = (ms) => { const m = Math.round((Date.now() - ms) / 60000); return m < 1 ? "recién" : m < 60 ? `hace ${m} min` : m < 1440 ? `hace ${Math.round(m / 60)} h` : `hace ${Math.round(m / 1440)} d`; };
+
+function cargarInfra() {
+  Promise.all([api("/api/infra"), api("/api/agente/tareas?asignado=agente&estado=cola,trabajando,revision,bloqueada&limite=200")])
+    .then(([i, c]) => { INF = i; INFcola = c; render(); })
+    .catch((e) => toast(e.message, true));
+}
+const infraAct = (btn, fn, msg) => act(btn, async () => { await fn(); INF = null; }, msg);
+const patchTarea = (id, body) => api(`/api/agente/tareas/${id}`, { method: "PATCH", body });
+
+function vistaInfra() {
+  const hoja = location.hash.split("/")[1] || "tablero";
+  if (!INF) { cargarInfra(); return h("p", { class: "cargando" }, "Cargando…"); }
+  const hojas = h("div", { class: "chips" },
+    h("a", { class: "chip" + (hoja === "tablero" ? " activa" : ""), href: "#infra/tablero" }, "Tablero de agentes"),
+    h("a", { class: "chip" + (hoja === "agentes" ? " activa" : ""), href: "#infra/agentes" }, "Agentes y conexión"));
+  return [h("section", { class: "tarjeta" }, h("h1", {}, "Infraestructura"), hojas), ...(hoja === "agentes" ? hojaAgentes() : hojaTablero())];
+}
+
+function filaTarea(t) {
+  const meta = [t.proyecto, t.prioridad ? `P${t.prioridad}` : null, t.carril === "cloud" ? (t.cloud_ok ? "cloud ✓" : "cloud · falta tu OK") : "local",
+    t.ventana === "noche" ? "de noche" : null, t.due_date ? `vence ${t.due_date}` : null, t.agente ? `${t.agente}${t.desde ? " · " + haceTxt(t.desde) : ""}` : null].filter(Boolean).join(" · ");
+  const prio = h("select", { "aria-label": "Prioridad", onchange: (e) => infraAct(e.target, () => patchTarea(t.id, { prioridad: Number(e.target.value) })) },
+    [1, 2, 3, 4].map((n) => h("option", { value: n, selected: (t.prioridad || 3) === n }, `P${n}`)));
+  const botones = [];
+  if (t.estado === "revision") {
+    botones.push(h("button", { class: "primario", onclick: (e) => infraAct(e.target, () => patchTarea(t.id, { estado: "aprobada" }), "Aprobada.") }, "Aprobar"));
+    botones.push(h("button", { onclick: (e) => { const n = prompt("¿Qué hay que corregir? (vuelve a la cola)"); if (n != null) infraAct(e.target, () => patchTarea(t.id, { estado: "cola", nota: n, detalle: [t.detalle, n && `Corrección: ${n}`].filter(Boolean).join("\n") }), "De vuelta a la cola."); } }, "Corregir"));
+  }
+  if (t.estado === "bloqueada") botones.push(h("button", { onclick: (e) => infraAct(e.target, () => patchTarea(t.id, { estado: "cola" }), "De vuelta a la cola.") }, "Reintentar"));
+  if (t.carril === "cloud" && !t.cloud_ok && t.estado === "cola") botones.push(h("button", { title: "Autoriza usar el proveedor pago para esta tarea", onclick: (e) => infraAct(e.target, () => patchTarea(t.id, { cloud_ok: true }), "Cloud aprobado para esta tarea.") }, "OK cloud"));
+  if (t.estado === "cola") botones.push(h("button", { title: t.carril === "cloud" ? "Pasar al carril local" : "Pasar al carril cloud", onclick: (e) => infraAct(e.target, () => patchTarea(t.id, { carril: t.carril === "cloud" ? "local" : "cloud" })) }, t.carril === "cloud" ? "→ local" : "→ cloud"));
+  botones.push(h("button", { class: "icono", title: "Me la quedo yo", "aria-label": "Quitar del agente", onclick: (e) => infraAct(e.target, () => patchTarea(t.id, { asignado: "yo" }), "Ahora es tuya (Tareas).") }, "↩"));
+  return h("li", { class: "tarea-agente" },
+    h("span", { class: "que" }, t.title, h("small", {}, meta),
+      t.detalle && t.estado !== "revision" ? h("small", {}, t.detalle.slice(0, 200)) : null,
+      t.resultado ? h("details", { open: t.estado === "revision" }, h("summary", {}, "Resultado"), h("pre", { class: "codigo resultado" }, t.resultado)) : null,
+      h("div", { class: "fila acciones" }, ...botones)),
+    t.estado === "cola" ? prio : null);
+}
+
+function hojaTablero() {
+  const c = INF.config;
+  const campo = (k, el) => { el.addEventListener("input", () => (borrador[k] = el.value)); el.addEventListener("change", () => (borrador[k] = el.value)); return el; };
+  const titulo = campo("title", h("input", { id: "ag-titulo", placeholder: "Qué tiene que dejar hecho", value: borrador.title }));
+  const proyecto = S.proyectos.length ? campo("proyecto_id", selectorProyecto("ag-proyecto", borrador.proyecto_id || null)) : null;
+  const prioridad = campo("prioridad", h("select", { id: "ag-prio" }, [1, 2, 3, 4].map((n) => h("option", { value: n, selected: String(n) === borrador.prioridad }, P_TXT[n]))));
+  const carril = campo("carril", h("select", { id: "ag-carril" }, h("option", { value: "local", selected: borrador.carril === "local" }, "Local (Ollama)"), h("option", { value: "cloud", selected: borrador.carril === "cloud" }, "Cloud (pago, con tu OK)")));
+  const ventana = campo("ventana", h("select", { id: "ag-ventana" }, h("option", { value: "dia", selected: borrador.ventana === "dia" }, "Cuando haya espacio"), h("option", { value: "noche", selected: borrador.ventana === "noche" }, `Solo de noche (${c.noche.desde}–${c.noche.hasta})`)));
+  const detalle = campo("detalle", h("textarea", { id: "ag-detalle", placeholder: "Contexto y cómo sé que quedó bien (opcional)" }));
+  detalle.value = borrador.detalle;
+  const crear = (e) => {
+    if (!borrador.title.trim()) return toast("Ponle nombre.", true);
+    infraAct(e.target, async () => {
+      await api("/api/agente/tareas", { method: "POST", body: { ...borrador, proyecto_id: borrador.proyecto_id || null, prioridad: Number(borrador.prioridad), asignado: "agente" } });
+      Object.assign(borrador, { title: "", detalle: "" });
+    }, "En la cola.");
+  };
+  const por = (est) => INFcola.filter((t) => t.estado === est);
+  const hechas = S.items.filter((i) => i.asignado === "agente" && ["aprobada", "rechazada"].includes(i.agente_estado)).slice(0, 15);
+  const columna = (est, ayuda) => { const xs = por(est); return xs.length ? h("section", { class: "tarjeta" }, h("h2", {}, `${ESTADO_TXT[est]} · ${xs.length}`), ayuda ? h("p", { class: "suave" }, ayuda) : null, h("ul", { class: "lista" }, xs.map(filaTarea))) : null; };
+  const estado = [
+    INF.noche ? "Ventana nocturna activa" : `De día · la noche empieza a las ${c.noche.desde}`,
+    INF.conversando_hasta ? `Tu asistente está en WhatsApp hasta las ${hora(INF.conversando_hasta)} (el carril local espera)` : null,
+    c.foco.length ? `Foco: ${c.foco.map(nombreProyecto).filter(Boolean).join(", ")}` : "Sin proyectos foco",
+  ].filter(Boolean).join(" · ");
+  return [
+    h("p", { class: "suave" }, estado),
+    columna("revision", "Lo que terminó un agente. Aprobar la marca hecha; Corregir la devuelve a la cola con tu nota."),
+    columna("trabajando"),
+    columna("bloqueada", "El agente no pudo seguir. Lee la nota en el historial o reintenta."),
+    h("section", { class: "tarjeta" }, h("h2", {}, `En cola · ${por("cola").length}`),
+      h("p", { class: "suave" }, "En este orden la toman: vence en 3 días o menos → proyecto foco → urgencia → la más antigua. Responder tus mensajes siempre va primero."),
+      por("cola").length ? h("ul", { class: "lista" }, por("cola").map(filaTarea)) : h("p", { class: "vacio" }, "Nada en cola. Delega desde aquí, desde Tareas (🤖) o pídeselo a tu asistente por WhatsApp.")),
+    h("section", { class: "tarjeta" }, h("h2", {}, "Nueva tarea para un agente"),
+      h("label", { for: "ag-titulo" }, "Tarea"), titulo,
+      h("div", { class: "col2" }, proyecto ? h("div", {}, h("label", { for: "ag-proyecto" }, "Proyecto"), proyecto) : h("div", {}), h("div", {}, h("label", { for: "ag-prio" }, "Urgencia"), prioridad)),
+      h("div", { class: "col2" }, h("div", {}, h("label", { for: "ag-carril" }, "Carril"), carril), h("div", {}, h("label", { for: "ag-ventana" }, "Cuándo"), ventana)),
+      h("label", { for: "ag-detalle" }, "Detalle"), detalle,
+      h("p"), h("button", { class: "primario", onclick: crear }, "Agregar a la cola")),
+    hechas.length ? h("section", { class: "tarjeta" }, h("details", {}, h("summary", {}, `Terminadas (${hechas.length})`),
+      h("ul", { class: "lista" }, hechas.map((i) => h("li", { class: "hecha" }, h("span", { class: "que" }, i.title, h("small", {}, [ESTADO_TXT[i.agente_estado], nombreProyecto(i.proyecto_id), i.agente].filter(Boolean).join(" · ")))))))) : null,
+  ];
+}
+
+function hojaAgentes() {
+  const c = INF.config;
+  const foco = h("div", { class: "chips", id: "cf-foco" }, S.proyectos.length ? S.proyectos.map((p) => h("label", { class: "chip", style: "display:inline-flex;align-items:center;gap:.35em;margin:0" },
+    h("input", { type: "checkbox", value: p.id, checked: c.foco.includes(p.id), style: "width:auto" }), p.nombre)) : h("span", { class: "suave" }, "Crea proyectos en la pestaña Proyectos."));
+  const desde = h("input", { id: "cf-desde", type: "time", value: c.noche.desde }), hasta = h("input", { id: "cf-hasta", type: "time", value: c.noche.hasta });
+  const pausa = h("input", { id: "cf-pausa", type: "number", min: 0, max: 30, value: c.pausa_conversacion_min });
+  const max = h("input", { id: "cf-max", type: "number", min: 1, max: 5, value: c.max_por_carril });
+  const vivo = (a) => Date.now() - a.visto < 5 * 60000;
+  const base = tokenAgente?.base || location.origin;
+  return [
+    h("section", { class: "tarjeta" }, h("h2", {}, "Agentes"),
+      INF.agentes.length ? h("ul", { class: "lista" }, INF.agentes.map((a) => h("li", {},
+        h("span", { class: "color", style: `background:${vivo(a) ? "var(--ok)" : "var(--linea)"}`, title: vivo(a) ? "Activo" : "Sin noticias" }),
+        h("span", { class: "que" }, a.nombre, h("small", {}, [a.carril, a.modelo, a.maquina, haceTxt(a.visto)].filter(Boolean).join(" · ")), a.tarea || a.estado ? h("small", {}, a.tarea ? `▶ ${a.tarea}` : a.estado) : null),
+        h("button", { class: "icono", title: "Olvidar", "aria-label": "Olvidar " + a.nombre, onclick: (e) => infraAct(e.target, () => api(`/api/infra/agentes/${encodeURIComponent(a.nombre)}`, { method: "DELETE" })) }, "✕"))))
+        : h("p", { class: "vacio" }, "Ningún agente se ha reportado. Aparecen aquí con su primer latido.")),
+    h("section", { class: "tarjeta" }, h("h2", {}, "Reglas de la cola"),
+      h("label", {}, "Proyectos foco de la semana (van primero en la cola, máximo 5)"), foco,
+      h("div", { class: "col2" }, h("div", {}, h("label", { for: "cf-desde" }, "Noche desde"), desde), h("div", {}, h("label", { for: "cf-hasta" }, "Noche hasta"), hasta)),
+      h("div", { class: "col2" }, h("div", {}, h("label", { for: "cf-pausa" }, "Pausa tras WhatsApp (min)"), pausa), h("div", {}, h("label", { for: "cf-max" }, "Tareas a la vez por carril"), max)),
+      h("p"), h("button", { class: "primario", onclick: (e) => infraAct(e.target, () => api("/api/infra/config", { method: "PUT", body: { foco: [...foco.querySelectorAll("input:checked")].map((x) => x.value), noche: { desde: desde.value, hasta: hasta.value }, pausa_conversacion_min: pausa.value, max_por_carril: max.value } }), "Guardado.") }, "Guardar")),
+    h("section", { class: "tarjeta" }, h("h2", {}, "Conectar Hermes"),
+      h("p", { class: "suave" }, "Un token de agente abre /api/agente/… y el servidor MCP (/mcp): lee tu agenda y la cola, crea y actualiza tareas. No abre tus cuentas, tokens ni ajustes, y no puede autoaprobarse el carril cloud. Con integraciones/hermes/instalar.sh, Hermes queda conectado por MCP y con sus trabajadores."),
+      tokenAgente ? h("div", {}, h("p", {}, h("b", {}, "Copia esto ahora (no se vuelve a mostrar) en ~/.hermes/.env del Mac:")),
+        h("code", { class: "codigo" }, `VEREDICTO_URL=${base}\nVEREDICTO_TOKEN=${tokenAgente.token}`),
+        h("button", { onclick: () => { tokenAgente = null; render(); } }, "Listo"))
+        : h("div", { class: "fila" }, h("input", { id: "tok-agente", class: "crece", placeholder: "Hermes · Mac mini" }),
+          h("button", { class: "primario", onclick: (e) => act(e.target, async () => { tokenAgente = await api("/api/tokens", { method: "POST", body: { label: $("#tok-agente").value || "Hermes", alcance: "agente" } }); INF = null; }) }, "Crear token")),
+      INF.tokens.length ? h("ul", { class: "lista" }, INF.tokens.map((t) => h("li", {}, h("span", { class: "que" }, t.label, h("small", {}, t.usado ? `usado ${haceTxt(t.usado)}` : "sin usar")),
+        h("button", { class: "icono peligro", title: "Revocar", "aria-label": "Revocar " + t.label, onclick: (e) => { if (confirm(`¿Revocar «${t.label}»? Ese agente deja de tener acceso.`)) infraAct(e.target, () => api(`/api/tokens/${t.id}`, { method: "DELETE" }), "Revocado."); } }, "✕")))) : null),
+    INF.eventos.length ? h("section", { class: "tarjeta" }, h("details", {}, h("summary", {}, "Historial reciente"),
+      h("ul", { class: "lista" }, INF.eventos.map((e) => h("li", {}, h("span", { class: "hora" }, haceTxt(e.at)), h("span", { class: "que" }, `${ESTADO_TXT[e.tipo] || e.tipo} · ${e.title || ""}`, h("small", {}, [e.agente, e.texto].filter(Boolean).join(" · ")))))))) : null,
+  ];
+}
+
 
 inicio().catch((e) => { vista.replaceChildren(h("p", { class: "vacio" }, "No pude conectar con el servidor. ", e.message)); });

@@ -56,9 +56,12 @@ export async function login(pool, password, label = "") {
   return token;
 }
 
-export async function newApiToken(pool, label) {
-  const token = "jdt_" + randomBytes(24).toString("base64url");
-  const r = await pool.query("INSERT INTO api_tokens(hash,label) VALUES ($1,$2) RETURNING id, label, created_at", [sha(token), String(label || "Atajo").slice(0, 60)]);
+// Alcance: atajo (Siri, reloj, MCP) · agente (Hermes: /api/agente y MCP) · carpeta (carpeta sincronizada).
+export async function newApiToken(pool, label, alcance = "atajo") {
+  alcance = ["agente", "carpeta"].includes(alcance) ? alcance : "atajo";
+  const token = { atajo: "jdt_", agente: "jdg_", carpeta: "jdc_" }[alcance] + randomBytes(24).toString("base64url");
+  const r = await pool.query("INSERT INTO api_tokens(hash,label,alcance) VALUES ($1,$2,$3) RETURNING id, label, alcance, created_at",
+    [sha(token), String(label || { atajo: "Atajo", agente: "Agente", carpeta: "Carpeta" }[alcance]).slice(0, 60), alcance]);
   return { ...r.rows[0], token };
 }
 
@@ -81,8 +84,8 @@ export async function identify(pool, req) {
   const h = req.headers.authorization || "";
   const tok = h.startsWith("Bearer ") ? h.slice(7).trim() : typeof req.query?.k === "string" ? req.query.k : null;
   if (tok) {
-    const r = await pool.query("UPDATE api_tokens SET last_used_at=now() WHERE hash=$1 RETURNING id, label", [sha(tok)]);
-    if (r.rowCount) return { via: "token", label: r.rows[0].label };
+    const r = await pool.query("UPDATE api_tokens SET last_used_at=now() WHERE hash=$1 RETURNING id, label, alcance", [sha(tok)]);
+    if (r.rowCount) return { via: "token", label: r.rows[0].label, alcance: r.rows[0].alcance };
   }
   return null;
 }
