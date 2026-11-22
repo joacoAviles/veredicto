@@ -14,6 +14,8 @@ import { setClave } from "../src/cifrado.js";
 
 const URL = process.env.TEST_DATABASE_URL;
 const run = promisify(execFile);
+// Como en un Mac con proxy del sistema: el cliente debe ir directo a un Veredicto local, nunca por el proxy.
+const SIN_PROXY_LOCAL = { HTTP_PROXY: "http://127.0.0.1:9", http_proxy: "http://127.0.0.1:9", NO_PROXY: "", no_proxy: "" };
 const CLIENTE = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "integraciones", "carpeta", "veredicto-carpeta.py");
 let pool, server, base, cookie = "", token = "", dir, cfg;
 
@@ -26,7 +28,7 @@ const call = async (p, { method = "GET", body, tok } = {}) => {
   if (sc && sc.startsWith("jdt_sesion=") && !sc.startsWith("jdt_sesion=;")) cookie = sc.split(";")[0];
   return { status: r.status, body: await r.json().catch(() => null) };
 };
-const cliente = (...args) => run("python3", [CLIENTE, ...args], { env: { ...process.env, VEREDICTO_CARPETA_CONFIG: cfg } });
+const cliente = (...args) => run("python3", [CLIENTE, ...args], { env: { ...process.env, ...SIN_PROXY_LOCAL, VEREDICTO_CARPETA_CONFIG: cfg } });
 const archivo = () => readFile(path.join(dir, "Pendientes.md"), "utf8");
 const nombreProyecto = async (id) => (await call("/api/estado")).body.proyectos.find((p) => p.id === id)?.nombre;
 const pendientes = async () => (await call("/api/estado")).body.items.filter((i) => i.kind === "tarea" && i.status !== "hecha");
@@ -97,11 +99,11 @@ test("lo que cambia en Veredicto aparece en el archivo", { skip: !URL }, async (
 
 test("un archivo por proyecto", { skip: !URL }, async () => {
   const d2 = await mkdtemp(path.join(tmpdir(), "vd-proyectos-"));
-  await run("python3", [CLIENTE, "configurar", "--url", base, "--token", token, "--carpeta", d2, "--por-proyecto"], { env: { ...process.env, VEREDICTO_CARPETA_CONFIG: cfg + "2" } });
+  await run("python3", [CLIENTE, "configurar", "--url", base, "--token", token, "--carpeta", d2, "--por-proyecto"], { env: { ...process.env, ...SIN_PROXY_LOCAL, VEREDICTO_CARPETA_CONFIG: cfg + "2" } });
   const files = (await readdir(d2)).filter((f) => f.endsWith(".md")).sort();
   assert.deepEqual(files, ["Sin proyecto.md", "Trabajo.md"]);
   await writeFile(path.join(d2, "Casa.md"), "# Casa\n\n- [ ] Pagar cuota\n");
-  await run("python3", [CLIENTE], { env: { ...process.env, VEREDICTO_CARPETA_CONFIG: cfg + "2" } });
+  await run("python3", [CLIENTE], { env: { ...process.env, ...SIN_PROXY_LOCAL, VEREDICTO_CARPETA_CONFIG: cfg + "2" } });
   const t = (await pendientes()).find((i) => i.title === "Pagar cuota");
   assert.equal(await nombreProyecto(t.proyecto_id), "Casa");
   assert.match(await readFile(path.join(d2, "Casa.md"), "utf8"), /Pagar cuota \^vd-/);
