@@ -2,6 +2,7 @@
 
 ## Sin publicar
 - **Carpeta sincronizada en Mac**: el cliente ya no pasa por el proxy del sistema cuando Veredicto es local (`localhost`/`127.0.0.1`). Antes el proxy respondía «403 Forbidden» y la carpeta no sincronizaba. Agregué una prueba que lo cubre.
+- **Pruebas de la carpeta aisladas**: ignoran `VEREDICTO_URL`, `VEREDICTO_TOKEN_CARPETA` y `VEREDICTO_CARPETA` del entorno. En un equipo con un agente configurado, esas variables hacían que las pruebas hablaran con el servidor real, que respondía 403.
 - **Para quien programa**: `AGENTS.md` con el contexto del repo y sus reglas. `MAPA-CODIGO.md` lista cada ruta, herramienta MCP y función con su línea y propósito; se genera con `node scripts/mapa-codigo.mjs`. Toda función de primer nivel lleva su comentario, y una prueba falla si falta uno o si el mapa no está al día.
 
 ## v3.1.0
