@@ -17,7 +17,7 @@ Solo usa la biblioteca estándar de Python 3.8+. Funciona en macOS, Linux y Wind
 
 El token se crea en Veredicto → Ajustes → Carpeta sincronizada (empieza con jdc_).
 """
-import argparse, hashlib, json, os, platform, re, subprocess, sys, tempfile, time, urllib.error, urllib.request
+import argparse, hashlib, json, os, platform, re, subprocess, sys, tempfile, time, urllib.error, urllib.parse, urllib.request
 from pathlib import Path
 
 CONFIG = Path(os.environ.get("VEREDICTO_CARPETA_CONFIG", Path.home() / ".config" / "veredicto" / "carpeta.json"))
@@ -44,12 +44,23 @@ def leer_config():
 
 
 # ---------- servidor ----------
+LOCALES = {"localhost", "127.0.0.1", "::1"}
+
+
+def _abrir(req, url):
+    """Abre la petición. A un Veredicto local nunca se va por proxy (un proxy del sistema respondería 403)."""
+    host = (urllib.parse.urlsplit(url).hostname or "").lower()
+    if host in LOCALES:
+        return urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=30)
+    return urllib.request.urlopen(req, timeout=30)
+
+
 def api(c, metodo, ruta, cuerpo=None):
     datos = json.dumps(cuerpo).encode() if cuerpo is not None else None
     req = urllib.request.Request(c["url"] + ruta, data=datos, method=metodo,
                                  headers={"Authorization": f"Bearer {c['token']}", "Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
+        with _abrir(req, c["url"]) as r:
             return json.loads(r.read().decode() or "{}")
     except urllib.error.HTTPError as e:
         try:
