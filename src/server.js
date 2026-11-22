@@ -89,6 +89,7 @@ every(10 * 60_000, "salud", async () => {
   await setSetting(pool, "cuentas_avisadas", avisadas);
 });
 
+// Cierra el pool y termina el proceso (SIGTERM/SIGINT).
 const bye = async () => { await pool.end().catch(() => {}); process.exit(0); };
 process.on("SIGTERM", bye);
 process.on("SIGINT", bye);

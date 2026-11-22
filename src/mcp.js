@@ -36,6 +36,7 @@ const TOOLS = [
     inputSchema: { type: "object", properties: { horas: { type: "integer", minimum: 1, maximum: 48 } } } },
 ];
 
+// Servidor MCP (JSON-RPC en /mcp): herramientas de tiempo, agenda, tareas y agentes.
 export function mcpRouter(app, pool, { need, cfg }) {
   const timer = (fn) => tx(pool, async (q) => { await core.lockTimer(q); return fn(q); });
   const linea = (x) => `${fmtHora(x.start, cfg.tz)}–${fmtHora(x.end, cfg.tz)} ${x.title}`;

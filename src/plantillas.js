@@ -76,17 +76,21 @@ export function merge(...capas) {
   }
   return out;
 }
+// Copia solo las claves pedidas de un objeto.
 const pick = (o, keys) => Object.fromEntries(Object.entries(o).filter(([k, v]) => keys.includes(k) && v !== undefined && v !== null));
 
+// Plantillas de avisos del tema instalado (avisos.json), si hay.
 export async function equipo(themeDir) {
   if (!themeDir) return null;
   try { return JSON.parse(await readFile(path.join(themeDir, "avisos.json"), "utf8")); } catch { return null; }
 }
 
+// Plantillas de avisos: las del tema mezcladas con las tuyas.
 export async function loadPlantillas(q, themeDir) {
   return merge(await equipo(themeDir), await getSetting(q, "plantillas", null));
 }
 
+// Reemplaza {variables} en un texto de plantilla.
 export const fill = (s, vars) => String(s ?? "").replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k] ?? "") : m));
 
 // Valida lo que llega desde Ajustes.

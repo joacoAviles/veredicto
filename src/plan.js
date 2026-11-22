@@ -2,6 +2,7 @@
 import { minuteOfDay, weekday, startOfDay, atMinute, dayKey, hhmmToMin } from "./time.js";
 
 const DAY = 86_400_000;
+// Si el día de la semana es sábado o domingo.
 const isWeekend = (wd) => wd === 0 || wd === 6;
 
 // Hábitos: mismas cosas empezadas a una hora parecida, en el mismo tipo de día.

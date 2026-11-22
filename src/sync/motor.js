@@ -16,15 +16,18 @@ export const NOTAS = { markdown, notion };
 const DIA = 86_400_000;
 export const VENTANA = { atras: 14 * DIA, adelante: 60 * DIA };
 
+// Configuración descifrada de una cuenta y función para guardarla.
 export async function cuentaConfig(pool, cuenta) {
   const cfg = descifrar(cuenta.config);
   const guardar = async (c) => pool.query("UPDATE cuentas SET config=$2 WHERE id=$1", [cuenta.id, cifrar(c)]);
   return { cfg, guardar };
 }
 
+// Registra un conflicto de sincronización (quién ganó).
 const conflicto = (q, objeto, ref, titulo, ganador, perdedor) =>
   q.query("INSERT INTO conflictos(objeto,ref,titulo,ganador,perdedor) VALUES ($1,$2,$3,$4,$5)", [objeto, ref, String(titulo || "").slice(0, 300), ganador, JSON.stringify(perdedor)]);
 
+// Cancela trabajos pendientes de la cola que perdieron contra un cambio externo.
 const cancelarCola = (q, kind, cond, val) =>
   q.query(`UPDATE outbox SET status='ok', last_error='cancelado: ganó el cambio de afuera', done_at=now() WHERE kind=$1 AND status<>'ok' AND ${cond}`, [kind, val]);
 
@@ -139,6 +142,7 @@ export async function conciliarNota(q, cuenta, nota, tareas) {
 
 // ---------- Base «Flujo» de Notion: cada fila es un ítem; con hora agendada, un bloque en tu calendario ----------
 const STATUS = { Bandeja: "pendiente", Idea: "pendiente", "Por hacer": "pendiente", Agendada: "pendiente", "En curso": "en curso", Hecha: "hecha", Archivada: "archivada" };
+// Concilia una tarea externa (Notion/Markdown) con la local.
 export async function conciliarFila(q, cuenta, r) {
   const prev = (await q.query("SELECT * FROM items WHERE cuenta_id=$1 AND ext_id=$2", [cuenta.id, r.id])).rows[0];
   const pend = prev ? (await q.query("SELECT 1 FROM outbox WHERE kind='gestion' AND ref=$1 AND status<>'ok'", [prev.id])).rowCount > 0 : false;
@@ -183,6 +187,7 @@ export async function conciliarFila(q, cuenta, r) {
   }
 }
 
+// Trae tareas de Markdown o Notion de una cuenta.
 async function pullNotas(pool, cuenta, cfg, guardar, o) {
   if (cuenta.tipo === "markdown") {
     await markdown.verificar(cfg);
@@ -218,6 +223,7 @@ async function pullNotas(pool, cuenta, cfg, guardar, o) {
   }
 }
 
+// Transacción con conexión propia.
 async function withTx(pool, fn) {
   const c = await pool.connect();
   try { await c.query("BEGIN"); const r = await fn(c); await c.query("COMMIT"); return r; }
@@ -253,12 +259,14 @@ export async function traer(pool, cuenta, { tz, now = Date.now(), fetcher = fetc
 // ---------- Despachar la cola ----------
 const backoff = (n) => Math.min(30_000 * 2 ** (n - 1), 3_600_000);
 
+// Calendario con un rol (plan/registrado) y su cuenta.
 async function calendarioCon(pool, rol) {
   const r = await pool.query(
     "SELECT c.*, k.tipo, k.config, k.id AS cuenta FROM calendars c JOIN cuentas k ON k.id=c.cuenta_id WHERE c.rol=$1 AND k.activa ORDER BY c.created_at LIMIT 1", [rol]);
   return r.rows[0] || null;
 }
 
+// Envía un trabajo de la cola a su destino (calendario, notas).
 async function despacharUno(pool, job, o) {
   const conCfg = async (cuentaRow) => {
     const { cfg, guardar } = await cuentaConfig(pool, cuentaRow);
@@ -343,6 +351,7 @@ async function despacharUno(pool, job, o) {
   }
 }
 
+// Envía los trabajos pendientes de la cola.
 export async function despachar(pool, o = {}, { limit = 50 } = {}) {
   const jobs = (await pool.query(
     "SELECT * FROM outbox WHERE status<>'ok' AND next_at<=now() AND kind IN ('bloque','evento','sesion_cal','gestion','bandeja') ORDER BY id LIMIT $1", [limit])).rows;
@@ -369,12 +378,14 @@ export async function despachar(pool, o = {}, { limit = 50 } = {}) {
 // ---------- Una pasada completa ----------
 // Todo pasa en serie: nunca dos despachos a la vez sobre la misma cola.
 let cola = Promise.resolve();
+// Encola trabajos para que corran de a uno.
 const enSerie = (fn) => { const p = cola.then(fn, fn); cola = p.catch(() => {}); return p; };
 
 // Solo empujar la cola (rápido, tras cada cambio en la app).
 export const empujar = (pool, o = {}) => enSerie(() => despachar(pool, o));
 
 let enCurso = null;
+// Pasada completa: traer de cuentas, conciliar y empujar la cola.
 export function sincronizar(pool, o = {}) {
   if (enCurso) return enCurso;
   enCurso = enSerie(async () => {

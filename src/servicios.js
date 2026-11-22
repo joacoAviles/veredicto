@@ -13,6 +13,7 @@ import { loadPlantillas } from "./plantillas.js";
 // Avisa a las pantallas abiertas que algo cambió (Server-Sent Events).
 export const bus = new EventEmitter();
 bus.setMaxListeners(200);
+// Avisa a la app en vivo (SSE) que algo cambió.
 export const changed = (what = "estado") => bus.emit("cambio", what);
 
 // Propone (o crea) los bloques del día según tus hábitos y rutinas, sin pisar tu calendario.

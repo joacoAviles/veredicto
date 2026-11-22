@@ -14,8 +14,10 @@ const PROV = {
   },
 };
 
+// URL de retorno OAuth del proveedor.
 export const redirectUri = (publicUrl, tipo) => `${publicUrl.replace(/\/$/, "")}/oauth/${tipo}`;
 
+// URL para autorizar en Google u Outlook.
 export function authUrl(tipo, { client_id, redirect, state }) {
   const p = PROV[tipo];
   const u = new URL(p.auth);
@@ -23,6 +25,7 @@ export function authUrl(tipo, { client_id, redirect, state }) {
   return u.href;
 }
 
+// Llamada al endpoint de tokens del proveedor.
 async function tokenCall(tipo, params, fetcher) {
   const r = await fetcher(PROV[tipo].token, {
     method: "POST",
@@ -38,6 +41,7 @@ async function tokenCall(tipo, params, fetcher) {
   return j;
 }
 
+// Cambia el código OAuth por tokens.
 export async function exchange(tipo, { client_id, client_secret, code, redirect }, fetcher = fetch) {
   const j = await tokenCall(tipo, { client_id, client_secret, code, redirect_uri: redirect, grant_type: "authorization_code" }, fetcher);
   if (!j.refresh_token) throw new Error("El proveedor no entregó permiso permanente. Quita el acceso de la app en tu cuenta y conecta de nuevo.");
@@ -55,6 +59,7 @@ export async function accessToken(tipo, cfg, { fetcher = fetch, onConfig } = {})
   return cfg.access_token;
 }
 
+// Llamada autenticada (renueva el token si venció).
 export async function api(tipo, cfg, method, url, { body, headers = {}, fetcher = fetch, onConfig } = {}) {
   const tok = await accessToken(tipo, cfg, { fetcher, onConfig });
   const r = await fetcher(url, {

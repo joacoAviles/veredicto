@@ -6,6 +6,7 @@ import path from "node:path";
 
 let KEY = null;
 
+// Carga la clave de cifrado del entorno o del archivo /datos/clave (la crea si falta).
 export async function initClave({ env = process.env, datos = "/datos" } = {}) {
   let raw = env.CLAVE_CIFRADO;
   if (!raw) {
@@ -22,8 +23,10 @@ export async function initClave({ env = process.env, datos = "/datos" } = {}) {
   setClave(raw);
 }
 
+// Fija la clave de cifrado (derivada con SHA-256).
 export const setClave = (raw) => { KEY = createHash("sha256").update(String(raw)).digest(); };
 
+// Cifra un objeto con AES-256-GCM (formato v1.iv.tag.datos).
 export function cifrar(obj) {
   if (!KEY) throw new Error("Clave de cifrado sin iniciar.");
   const iv = randomBytes(12);
@@ -32,6 +35,7 @@ export function cifrar(obj) {
   return `v1.${iv.toString("base64url")}.${c.getAuthTag().toString("base64url")}.${data.toString("base64url")}`;
 }
 
+// Descifra lo que produjo cifrar().
 export function descifrar(s) {
   if (!KEY) throw new Error("Clave de cifrado sin iniciar.");
   const [v, iv, tag, data] = String(s).split(".");

@@ -1,5 +1,8 @@
 # Cambios
 
+## Sin publicar
+- **Para quien programa**: `AGENTS.md` con el contexto del repo y sus reglas. `MAPA-CODIGO.md` lista cada ruta, herramienta MCP y función con su línea y propósito; se genera con `node scripts/mapa-codigo.mjs`. Toda función de primer nivel lleva su comentario, y una prueba falla si falta uno o si el mapa no está al día.
+
 ## v3.1.0
 - **Carpeta sincronizada**: tus tareas pendientes en un `.md` local (macOS, Linux, Windows), en ambos sentidos. Marcar, renombrar y crear desde el archivo, con proyecto (`## Proyecto`), fecha (`📅`) y Eisenhower (`[Hacer ya]`). Cliente sin dependencias en `integraciones/carpeta/` con `configurar` e `instalar` (launchd, systemd o el Programador de tareas). Tokens `jdc_…` que solo abren `/api/carpeta/…`.
 - **Infraestructura (opcional, apagada por defecto)**: se activa en Ajustes → Módulos y agrega la pestaña Infra con las hojas «Tablero de agentes» y «Agentes y conexión». Es una cola de tareas para agentes de IA dentro de tus proyectos, con urgencia P1–P4, proyectos foco, carril local/cloud (cloud solo con tu OK) y ventana nocturna. Corre una tarea a la vez por carril y las abandonadas vuelven solas a la cola. Delegar marca «Delegar» en Eisenhower. Botón 🤖 en Tareas.

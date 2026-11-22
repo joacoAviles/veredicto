@@ -3,9 +3,12 @@ import { api } from "./oauth.js";
 import { zoned } from "../time.js";
 
 const BASE = "https://www.googleapis.com/calendar/v3";
+// Llamada a Google Calendar con OAuth.
 const g = (cfg, m, url, o = {}) => api("google", cfg, m, url.startsWith("http") ? url : BASE + url, o);
+// AAAA-MM-DD a medianoche en la zona dada.
 const fecha = (s, tz) => { const [y, m, d] = s.split("-").map(Number); return zoned(y, m, d, 0, 0, 0, tz); };
 
+// Calendarios de la cuenta de Google.
 export async function listCalendars(cfg, o = {}) {
   const j = await g(cfg, "GET", "/users/me/calendarList?maxResults=250", o);
   return {
@@ -16,11 +19,13 @@ export async function listCalendars(cfg, o = {}) {
   };
 }
 
+// Crea un calendario en Google.
 export async function createCalendar(cfg, nombre, o = {}) {
   const j = await g(cfg, "POST", "/calendars", { body: { summary: nombre, timeZone: o.tz || "UTC" }, ...o });
   return j.id;
 }
 
+// Eventos de un calendario dentro del rango (paginado).
 export async function pull(cfg, calId, from, to, tz, o = {}) {
   const out = [];
   let page = "";
@@ -45,6 +50,7 @@ export async function pull(cfg, calId, from, to, tz, o = {}) {
   return out;
 }
 
+// Evento local al formato de Google.
 const cuerpo = ({ title, start, end, all_day, descripcion }, tz) => ({
   ...(title != null ? { summary: title } : {}),
   ...(descripcion ? { description: descripcion } : {}),
@@ -52,6 +58,7 @@ const cuerpo = ({ title, start, end, all_day, descripcion }, tz) => ({
   ...(end != null ? { end: all_day ? { date: new Date(end).toISOString().slice(0, 10) } : { dateTime: new Date(end).toISOString(), timeZone: tz } } : {}),
 });
 
+// Crea o reemplaza un evento.
 export async function put(cfg, calId, ev, { href, etag } = {}, o = {}) {
   const j = href
     ? await g(cfg, "PATCH", href, { body: cuerpo(ev, o.tz || "UTC"), headers: etag ? { "If-Match": etag } : {}, ...o })
@@ -59,11 +66,13 @@ export async function put(cfg, calId, ev, { href, etag } = {}, o = {}) {
   return { uid: j.id, href: `/calendars/${encodeURIComponent(calId)}/events/${encodeURIComponent(j.id)}`, etag: j.etag };
 }
 
+// Cambia campos de un evento.
 export async function patch(cfg, href, etag, cambios, o = {}) {
   const j = await g(cfg, "PATCH", href, { body: cuerpo(cambios, o.tz || "UTC"), headers: etag ? { "If-Match": etag } : {}, ...o });
   return { etag: j.etag };
 }
 
+// Borra un evento (ignora si ya no existe).
 export async function remove(cfg, href, etag, o = {}) {
   try { await g(cfg, "DELETE", href, { headers: etag ? { "If-Match": etag } : {}, ...o }); }
   catch (e) { if (!e.borrado) throw e; }

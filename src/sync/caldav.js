@@ -5,15 +5,19 @@ import { randomUUID } from "node:crypto";
 import { parseICS, expand } from "../conectores/ical.js";
 
 const xml = new XMLParser({ ignoreAttributes: false, removeNSPrefix: true, parseTagValue: false, trimValues: true });
+// Valor a lista (null → []).
 const arr = (x) => (x == null ? [] : Array.isArray(x) ? x : [x]);
+// Texto de un nodo XML.
 const txt = (x) => (x == null ? "" : typeof x === "object" ? String(x["#text"] ?? "") : String(x));
 
 export const ICLOUD = "https://caldav.icloud.com/";
 
+// Cabecera Basic con usuario y clave.
 function authHeader(cfg) {
   return "Basic " + Buffer.from(`${cfg.usuario}:${cfg.clave}`).toString("base64");
 }
 
+// Petición WebDAV con autenticación y tiempo límite.
 async function dav(cfg, method, url, { body, depth, headers = {}, fetcher = fetch } = {}) {
   const r = await fetcher(url, {
     method,
@@ -29,12 +33,15 @@ async function dav(cfg, method, url, { body, depth, headers = {}, fetcher = fetc
   return r;
 }
 
+// Respuestas de un multistatus.
 const responses = (text) => arr(xml.parse(text)?.multistatus?.response);
+// Propiedades del propstat con estado 200.
 const okProp = (resp) => {
   const ps = arr(resp.propstat).find((p) => /200/.test(txt(p.status))) || arr(resp.propstat)[0];
   return ps?.prop || {};
 };
 
+// PROPFIND con las propiedades pedidas.
 async function propfind(cfg, url, props, depth, opts) {
   const body = `<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:ic="http://apple.com/ns/ical/"><d:prop>${props}</d:prop></d:propfind>`;
   const r = await dav(cfg, "PROPFIND", url, { body, depth, ...opts });
@@ -55,6 +62,7 @@ export async function discover(cfg, opts = {}) {
   return new URL(txt(arr(home)[0]), principal).href;
 }
 
+// Calendarios de la cuenta CalDAV.
 export async function listCalendars(cfg, opts = {}) {
   const home = cfg.home || (await discover(cfg, opts));
   const rs = await propfind(cfg, home, "<d:resourcetype/><d:displayname/><ic:calendar-color/><c:supported-calendar-component-set/><d:current-user-privilege-set/>", 1, opts);
@@ -76,6 +84,7 @@ export async function listCalendars(cfg, opts = {}) {
   return { home, calendarios: out };
 }
 
+// Crea un calendario «veredicto-…» en la cuenta.
 export async function createCalendar(cfg, nombre, opts = {}) {
   const home = cfg.home || (await discover(cfg, opts));
   const url = new URL(`veredicto-${randomUUID().slice(0, 8)}/`, home).href;
@@ -85,7 +94,9 @@ export async function createCalendar(cfg, nombre, opts = {}) {
   return url;
 }
 
+// Escapa texto para XML.
 const esc = (s) => String(s).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c]);
+// Milisegundos a fecha UTC de iCalendar.
 const dt = (ms) => new Date(ms).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
 
 // Trae los eventos de un calendario dentro de la ventana, con su etag.
@@ -104,6 +115,7 @@ export async function pull(cfg, calUrl, from, to, tz, opts = {}) {
   return out;
 }
 
+// Arma el VEVENT de un bloque o evento.
 export function toICS({ uid, title, start, end, all_day, descripcion }) {
   const d = (ms) => new Date(ms).toISOString().slice(0, 10).replace(/-/g, "");
   const fold = (l) => { const o = []; while (l.length > 74) { o.push(l.slice(0, 74)); l = " " + l.slice(74); } o.push(l); return o.join("\r\n"); };
@@ -141,6 +153,7 @@ export function patchICS(raw, { title, start, end }) {
   return out.join("\r\n");
 }
 
+// ETag actual de un evento.
 async function etagOf(cfg, href, opts) {
   const rs = await propfind(cfg, href, "<d:getetag/>", 0, opts);
   return txt(okProp(rs[0]).getetag) || null;
@@ -170,6 +183,7 @@ export async function patch(cfg, href, etag, cambios, opts = {}) {
   return { etag: r.headers.get("etag") || (await etagOf(cfg, href, opts)) };
 }
 
+// Borra un evento (con If-Match si hay ETag).
 export async function remove(cfg, href, etag, opts = {}) {
   const r = await dav(cfg, "DELETE", href, { headers: etag ? { "If-Match": etag } : {}, ...opts });
   if (r.status === 412) throw Object.assign(new Error("Cambió afuera mientras tanto."), { conflicto: true });

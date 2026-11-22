@@ -14,12 +14,14 @@ export const PRED_DEFAULTS = {
 };
 export const MODOS = ["agendar", "sugerir", "nunca"];
 
+// Ajustes del algoritmo de sugerencias con sus valores por defecto.
 export async function getPrediccion(q) {
   const p = { ...PRED_DEFAULTS, ...(await getSetting(q, "prediccion", {})) };
   p.modos = { ...(p.modos || {}) };
   return p;
 }
 
+// Modo de una tarea/rutina (sugerir, agendar o nunca).
 export const modoDe = (pred, itemId, { rutinaConHora = false } = {}) =>
   pred.modos[itemId] || (rutinaConHora ? "agendar" : pred.modo_defecto);
 
@@ -34,13 +36,16 @@ export async function habitosConModo(q, now, tz, pred) {
 
 // Filtra según el uso: "agendar" solo deja lo que puede agendarse solo; "sugerir" deja agendar + sugerir.
 export const paraAgendar = (hab) => hab.filter((h) => h.modo === "agendar");
+// Hábitos que se pueden sugerir (sin los marcados «nunca»).
 export const paraSugerir = (hab) => hab.filter((h) => h.modo !== "nunca");
+// Rutinas permitidas para un uso (sugerir o agendar).
 export const rutinasPermitidas = (rutinas, pred, uso) =>
   rutinas.filter((r) => {
     const m = modoDe(pred, r.id, { rutinaConHora: !!r.hora });
     return uso === "agendar" ? m === "agendar" : m !== "nunca";
   });
 
+// Valida los ajustes del algoritmo que llegan desde la app.
 export function sanitizePred(prev, b = {}) {
   const n = (v, lo, hi, d) => (Number.isFinite(Number(v)) ? Math.max(lo, Math.min(hi, Number(v))) : d);
   const out = { ...PRED_DEFAULTS, ...prev };

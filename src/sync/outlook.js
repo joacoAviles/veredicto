@@ -2,20 +2,25 @@
 import { api } from "./oauth.js";
 
 const BASE = "https://graph.microsoft.com/v1.0";
+// Llamada a Microsoft Graph con zona UTC.
 const m = (cfg, method, url, o = {}) => api("outlook", cfg, method, url.startsWith("http") ? url : BASE + url, {
   ...o, headers: { Prefer: 'outlook.timezone="UTC"', ...(o.headers || {}) },
 });
+// Fecha de Graph a milisegundos UTC.
 const utc = (s) => Date.parse(/Z|[+-]\d\d:?\d\d$/.test(s) ? s : s + "Z");
 
+// Calendarios de la cuenta de Outlook.
 export async function listCalendars(cfg, o = {}) {
   const j = await m(cfg, "GET", "/me/calendars?$top=100", o);
   return { calendarios: (j.value || []).map((c) => ({ remote_id: c.id, nombre: c.name, color: c.hexColor || null, editable: c.canEdit !== false })) };
 }
 
+// Crea un calendario en Outlook.
 export async function createCalendar(cfg, nombre, o = {}) {
   return (await m(cfg, "POST", "/me/calendars", { body: { name: nombre }, ...o })).id;
 }
 
+// Eventos de un calendario dentro del rango (paginado).
 export async function pull(cfg, calId, from, to, tz, o = {}) {
   const out = [];
   let url = `/me/calendars/${encodeURIComponent(calId)}/calendarView?startDateTime=${new Date(from).toISOString()}&endDateTime=${new Date(to).toISOString()}&$top=500&$select=id,subject,start,end,isAllDay,type,lastModifiedDateTime,isCancelled`;
@@ -35,6 +40,7 @@ export async function pull(cfg, calId, from, to, tz, o = {}) {
   return out;
 }
 
+// Evento local al formato de Graph.
 const cuerpo = ({ title, start, end, all_day, descripcion }) => ({
   ...(title != null ? { subject: title } : {}),
   ...(descripcion ? { body: { contentType: "text", content: descripcion } } : {}),
@@ -43,6 +49,7 @@ const cuerpo = ({ title, start, end, all_day, descripcion }) => ({
   ...(all_day != null ? { isAllDay: !!all_day } : {}),
 });
 
+// Crea o reemplaza un evento.
 export async function put(cfg, calId, ev, { href, etag } = {}, o = {}) {
   const j = href
     ? await m(cfg, "PATCH", href, { body: cuerpo(ev), headers: etag ? { "If-Match": etag } : {}, ...o })
@@ -50,11 +57,13 @@ export async function put(cfg, calId, ev, { href, etag } = {}, o = {}) {
   return { uid: j.id, href: `/me/events/${encodeURIComponent(j.id)}`, etag: j["@odata.etag"] || null };
 }
 
+// Cambia campos de un evento.
 export async function patch(cfg, href, etag, cambios, o = {}) {
   const j = await m(cfg, "PATCH", href, { body: cuerpo(cambios), headers: etag ? { "If-Match": etag } : {}, ...o });
   return { etag: j["@odata.etag"] || null };
 }
 
+// Borra un evento (ignora si ya no existe).
 export async function remove(cfg, href, etag, o = {}) {
   try { await m(cfg, "DELETE", href, { headers: etag ? { "If-Match": etag } : {}, ...o }); }
   catch (e) { if (!e.borrado) throw e; }

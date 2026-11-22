@@ -1,15 +1,20 @@
 // Notion en ambos sentidos: las casillas (to_do) de las páginas bajo tu página raíz son gestiones.
 import { Client } from "@notionhq/client";
 
+// Cliente de Notion con el token de la cuenta.
 export const cliente = (cfg, fetcher) => new Client({ auth: cfg.token, timeoutMs: 25_000, ...(fetcher ? { fetch: fetcher } : {}) });
 
+// Id de página desde un enlace o id de Notion.
 export function pageIdFrom(input) {
   const m = String(input || "").match(/([0-9a-f]{32})|([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
   return m ? (m[1] || m[2]).replace(/-/g, "") : null;
 }
+// rich_text a texto plano.
 const plano = (rt) => (rt || []).map((x) => x.plain_text || "").join("").trim();
+// Título de una página de Notion.
 const tituloDe = (p) => plano(Object.values(p.properties || {}).find((x) => x.type === "title")?.title) || "Sin título";
 
+// Comprueba el acceso a la página raíz y encuentra las bases.
 export async function verificar(cfg, n = cliente(cfg)) {
   const id = pageIdFrom(cfg.raiz);
   if (!id) throw new Error("No reconozco esa página. Pega el enlace completo de la página de Notion.");
@@ -58,6 +63,7 @@ export async function leer(cfg, pageId, n = cliente(cfg)) {
   return out;
 }
 
+// Marca o desmarca un to-do en Notion.
 export async function marcar(cfg, blockId, hecha, n = cliente(cfg)) {
   try { await n.blocks.update({ block_id: blockId, to_do: { checked: !!hecha } }); }
   catch (e) { if (e.status === 404) throw Object.assign(new Error("La casilla ya no está en Notion."), { borrado: true }); throw e; }
@@ -92,6 +98,7 @@ export const TIPOS = ["Idea", "Video", "Gestión", "Nota"];
 const P = { nombre: "Nombre", tipo: "Tipo", etapa: "Estado", dur: "Duración (min)", agendar: "Agendar", min: "Minutos registrados", ultima: "Última sesión" };
 const COLOR = { Bandeja: "gray", Idea: "purple", "Por hacer": "orange", Agendada: "blue", "En curso": "yellow", Hecha: "green", Archivada: "brown" };
 
+// Crea la base «flujo» en la página raíz.
 export async function crearFlujo(cfg, n = cliente(cfg)) {
   const db = await n.databases.create({
     parent: { type: "page_id", page_id: pageIdFrom(cfg.raiz) },
@@ -109,7 +116,9 @@ export async function crearFlujo(cfg, n = cliente(cfg)) {
   return db.id;
 }
 
+// Nombre de una propiedad select.
 const sel = (p) => p?.select?.name || null;
+// Página de la base flujo a fila local.
 export function fila(page) {
   const pr = page.properties || {};
   const ag = pr[P.agendar]?.date || null;
@@ -154,6 +163,7 @@ export async function escribirFila(cfg, pageId, { etapa, agendar, minutos, ultim
   catch (e) { if (e.status === 404) throw Object.assign(new Error("La fila ya no está en Notion."), { borrado: true }); throw e; }
 }
 
+// Crea una fila en la base flujo (idea o tarea).
 export async function nuevaFila(cfg, texto, { tipo = "Idea", etapa = "Bandeja" } = {}, n = cliente(cfg)) {
   const [primera, ...resto] = String(texto).trim().split(/\r?\n/);
   const p = await n.pages.create({

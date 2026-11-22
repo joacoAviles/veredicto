@@ -12,9 +12,13 @@ export const BASES = [
 ];
 const NOMBRE = Object.fromEntries(BASES);
 
+// Texto a rich_text de Notion (recortado).
 const T = (s) => [{ type: "text", text: { content: String(s ?? "").slice(0, 1900) } }];
+// rich_text de Notion a texto plano.
 const plano = (rt) => (rt || []).map((x) => x.plain_text || "").join("").trim();
+// Fecha a ISO (null si no hay).
 const iso = (d) => (d ? new Date(d).toISOString() : null);
+// Fecha a AAAA-MM-DD.
 const dia = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null);
 const P = {
   title: (v) => ({ title: T(v) }), text: (v) => ({ rich_text: v ? T(v) : [] }), num: (v) => ({ number: v == null ? null : Math.round(v) }),
@@ -38,6 +42,7 @@ export async function enlazarFlujo(n, flujoId, proyectosId) {
   catch { /* si no se puede, Flujo sigue funcionando sin proyecto */ }
 }
 
+// Crea las 9 bases de Notion bajo la página raíz.
 export async function crear(n, raiz) {
   const parent = { type: "page_id", page_id: pageIdFrom(raiz) };
   const mk = async (clave, properties) => (await n.databases.create({ parent, title: T(`Veredicto · ${NOMBRE[clave]}`), properties })).id;
@@ -85,6 +90,7 @@ async function todas(n, database_id) {
   }
   return out;
 }
+// Lee una propiedad de una página de Notion como valor simple.
 const leer = (p, k) => {
   const v = p.properties?.[k];
   if (!v) return null;
@@ -98,10 +104,13 @@ const leer = (p, k) => {
   if (v.type === "url") return v.url;
   return null;
 };
+// Guarda qué página de Notion corresponde a cada fila local.
 const recordar = (q, base, ref, page) => q.query(
   "INSERT INTO notion_espejo(base,ref,page_id,version) VALUES ($1,$2,$3,'importado') ON CONFLICT (base,ref) DO UPDATE SET page_id=EXCLUDED.page_id", [base, ref, page]);
+// Id de Notion sin guiones.
 const sinGuiones = (id) => String(id || "").replace(/-/g, "");
 
+// Importa desde las 9 bases de Notion: pilares, proyectos, tareas, rutinas, sesiones, calendario e ideas.
 export async function importar(pool, n, bases, { log = () => {} } = {}) {
   const cuenta = { pilares: 0, proyectos: 0, tareas: 0, rutinas: 0, sesiones: 0, calendario: 0, ideas: 0 };
   const mapa = new Map(); // page id de Notion → id en Veredicto
@@ -187,6 +196,7 @@ export async function importar(pool, n, bases, { log = () => {} } = {}) {
 const hash = (o) => createHash("sha1").update(JSON.stringify(o)).digest("hex").slice(0, 16);
 const SESION_DIAS = 60;
 
+// Filas locales de una base para publicar en Notion.
 async function filas(q, base, tz) {
   const pg = async (b) => new Map((await q.query("SELECT ref, page_id FROM notion_espejo WHERE base=$1", [b])).rows.map((r) => [r.ref, r.page_id]));
   if (base === "pilares") {
@@ -268,6 +278,7 @@ async function filas(q, base, tz) {
   return [];
 }
 
+// Publica en Notion lo que cambió localmente (hasta `limite` filas).
 export async function publicar(pool, n, bases, { tz = "UTC", limite = 60 } = {}) {
   let hechos = 0;
   for (const [base] of BASES) {

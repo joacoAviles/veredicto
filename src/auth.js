@@ -2,16 +2,20 @@
 import { randomBytes, scryptSync, timingSafeEqual, createHash, createHmac } from "node:crypto";
 import { getSetting, setSetting } from "./db.js";
 
+// SHA-256 en hexadecimal.
 const sha = (s) => createHash("sha256").update(String(s)).digest("hex");
+// Compara dos textos en tiempo constante.
 const same = (a, b) => {
   const x = Buffer.from(sha(a)), y = Buffer.from(sha(b));
   return timingSafeEqual(x, y);
 };
 
+// Hash scrypt con sal para la contraseña de la cuenta.
 export function hashPassword(pw) {
   const salt = randomBytes(16).toString("hex");
   return `scrypt:${salt}:${scryptSync(pw, salt, 64).toString("hex")}`;
 }
+// Verifica una contraseña contra su hash scrypt.
 export function checkPassword(pw, stored) {
   const [, salt, hex] = String(stored || "").split(":");
   if (!salt || !hex) return false;
@@ -19,6 +23,7 @@ export function checkPassword(pw, stored) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+// Secreto del servidor para firmar acciones (se crea la primera vez).
 export async function secret(pool) {
   let s = await getSetting(pool, "secreto");
   if (!s) { s = randomBytes(32).toString("hex"); await setSetting(pool, "secreto", s); }
@@ -33,6 +38,7 @@ export async function setupCode(pool) {
   return c;
 }
 
+// Crea la única cuenta con el código de instalación; falla si ya existe.
 export async function createAccount(pool, { password, codigo }) {
   if (await getSetting(pool, "cuenta")) throw Object.assign(new Error("La cuenta ya existe."), { status: 409 });
   const expected = await getSetting(pool, "codigo_instalacion");
@@ -42,12 +48,14 @@ export async function createAccount(pool, { password, codigo }) {
   await pool.query("DELETE FROM settings WHERE key='codigo_instalacion'");
 }
 
+// Crea la cuenta desde una contraseña de entorno si aún no existe.
 export async function presetAccount(pool, password) {
   if (!password || (await getSetting(pool, "cuenta"))) return;
   await setSetting(pool, "cuenta", { hash: hashPassword(password), creada: new Date().toISOString() });
   await pool.query("DELETE FROM settings WHERE key='codigo_instalacion'");
 }
 
+// Valida la contraseña y abre una sesión (cookie) nueva.
 export async function login(pool, password, label = "") {
   const c = await getSetting(pool, "cuenta");
   if (!c || !checkPassword(password, c.hash)) return null;
@@ -66,12 +74,15 @@ export async function newApiToken(pool, label, alcance = "atajo") {
 }
 
 const cookieName = "jdt_sesion";
+// Lee la cookie de sesión de la petición.
 export const readCookie = (req) =>
   (req.headers.cookie || "").split(";").map((x) => x.trim()).find((x) => x.startsWith(cookieName + "="))?.slice(cookieName.length + 1);
 
+// Deja la cookie de sesión (HttpOnly, 180 días; Secure si corresponde).
 export function setCookie(res, token, secure) {
   res.setHeader("Set-Cookie", `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${180 * 86400}${secure ? "; Secure" : ""}`);
 }
+// Borra la cookie de sesión.
 export const clearCookie = (res) => res.setHeader("Set-Cookie", `${cookieName}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
 
 // Autentica por cookie (navegador) o por token (atajos): cabecera Bearer o ?k=.
@@ -90,6 +101,7 @@ export async function identify(pool, req) {
   return null;
 }
 
+// Cierra la sesión del navegador actual.
 export async function logout(pool, req) {
   const c = readCookie(req);
   if (c) await pool.query("DELETE FROM auth_sessions WHERE id_hash=$1", [sha(c)]);
@@ -102,6 +114,7 @@ export function signAction(sec, action, payload, ttlMs = 12 * 3600_000, now = Da
   const sig = createHmac("sha256", sec).update(body).digest("base64url");
   return `${body}.${sig}`;
 }
+// Verifica y decodifica un enlace de acción firmado (HMAC) que aún no vence.
 export function verifyAction(sec, token, now = Date.now()) {
   const [body, sig] = String(token || "").split(".");
   if (!body || !sig) return null;

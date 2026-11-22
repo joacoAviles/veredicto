@@ -18,14 +18,17 @@ export const DEFAULTS = {
 
 // Módulos opcionales: la Infraestructura (agentes) viene apagada y se enciende en Ajustes.
 export const MODULOS = { infra: false };
+// Módulos opcionales encendidos (p. ej. infra), con sus valores por defecto.
 export async function modulos(q) { return { ...MODULOS, ...((await getSetting(q, "modulos", {})) || {}) }; }
 
+// Configuración de agentes (foco, ventana de noche, pausas) mezclada con los valores por defecto.
 export async function config(q) {
   const c = { ...DEFAULTS, ...((await getSetting(q, "agentes", {})) || {}) };
   c.noche = { ...DEFAULTS.noche, ...(c.noche || {}) };
   return c;
 }
 
+// Valida y normaliza la configuración de agentes que llega desde la app.
 export function sanitizeConfig(b, prev = DEFAULTS) {
   const hhmm = (v, d) => (/^([01]\d|2[0-3]):[0-5]\d$/.test(String(v)) ? String(v) : d);
   const num = (v, d, lo, hi) => (Number.isFinite(Number(v)) ? Math.max(lo, Math.min(hi, Math.round(Number(v)))) : d);
@@ -39,6 +42,7 @@ export function sanitizeConfig(b, prev = DEFAULTS) {
   };
 }
 
+// Si `now` cae dentro de la ventana de noche configurada (cruza medianoche si hace falta).
 export function esNoche(now, tz, c) {
   const m = minuteOfDay(now, tz), a = hhmmToMin(c.noche.desde), b = hhmmToMin(c.noche.hasta);
   return a <= b ? m >= a && m < b : m >= a || m < b;
@@ -48,13 +52,17 @@ export function esNoche(now, tz, c) {
 const ORDEN = `(i.due_date IS NOT NULL AND i.due_date <= $1::date) DESC,
   (i.proyecto_id IS NOT NULL AND i.proyecto_id = ANY($2::uuid[])) DESC,
   coalesce(i.prioridad, 3), i.created_at`;
+// Parámetros SQL del orden de la cola: vence en ≤3 días, proyectos en foco y prioridad.
 const ordenArgs = (now, tz, c) => [dayKey(addDays(startOfDay(now, tz), 3, tz), tz), c.foco];
 const SEL = "SELECT i.*, p.nombre AS proyecto_nombre FROM items i LEFT JOIN proyectos p ON p.id=i.proyecto_id";
+// Lee una tarea con el nombre de su proyecto.
 const leerItem = async (q, id) => (await q.query(`${SEL} WHERE i.id=$1`, [id])).rows[0];
 
+// Registra un evento de agente (tomó, latido, terminó…) en agente_eventos.
 const evento = (q, itemId, agente, tipo, texto = "") =>
   q.query("INSERT INTO agente_eventos(item_id, agente, tipo, texto) VALUES ($1,$2,$3,$4)", [itemId, String(agente || "").slice(0, 60), tipo, String(texto).slice(0, 2000)]);
 
+// Forma pública de una tarea para agentes y la app (campos de agente incluidos).
 export function vistaItem(i) {
   return {
     id: i.id, title: i.title, status: i.status, proyecto: i.proyecto_nombre || null, proyecto_id: i.proyecto_id || null,
@@ -112,6 +120,7 @@ async function proyectoId(q, b) {
   throw new core.HttpError(400, `No encontré el proyecto «${b.proyecto}».${hay.length ? " Proyectos: " + hay.join(", ") + "." : " Aún no hay proyectos."}`);
 }
 
+// Crea una tarea delegable con prioridad, carril, ventana y asignación.
 export async function crear(q, b, { agente = "" } = {}) {
   const it = await core.createItem(q, { kind: "tarea", title: b.title, est_min: b.est_min, due_date: b.due_date, eisenhower: b.eisenhower || (b.asignado === "agente" ? "Delegar" : null) });
   const asignado = b.asignado === "agente" ? "agente" : "yo";
@@ -120,6 +129,7 @@ export async function crear(q, b, { agente = "" } = {}) {
   return out;
 }
 
+// Cambia campos de una tarea; valida transiciones de estado y deja evento.
 export async function actualizar(q, id, b, { agente = "", via = "cookie", crear = false } = {}) {
   const prev = (await q.query("SELECT * FROM items WHERE id=$1 AND kind='tarea'", [id])).rows[0];
   if (!prev) throw new core.HttpError(404, "No encontré esa tarea.");
@@ -173,6 +183,7 @@ export async function actualizar(q, id, b, { agente = "", via = "cookie", crear 
   return vistaItem(it);
 }
 
+// Lista tareas de agentes con filtros (asignado, estado, carril, proyecto) en orden de cola.
 export async function listar(q, { asignado, estado, carril, proyecto, limite = 50, tz, now = Date.now() } = {}) {
   const c = await config(q);
   const w = ["i.kind='tarea'", "i.status <> 'archivada'"], vals = ordenArgs(now, tz, c);
@@ -219,6 +230,7 @@ export async function contexto(q, { tz, now = Date.now() }) {
   };
 }
 
+// Marca que un agente sigue vivo (y en qué tarea trabaja).
 export async function latido(q, b) {
   const nombre = String(b.agente || b.nombre || "").trim().slice(0, 60);
   if (!nombre) throw new core.HttpError(400, "Falta el nombre del agente.");
@@ -230,6 +242,7 @@ export async function latido(q, b) {
   if (b.item_id) await q.query("UPDATE items SET agente_desde=now() WHERE id=$1 AND agente_estado='trabajando'", [b.item_id]);
 }
 
+// Pausa el carril local unos minutos: WhatsApp tiene prioridad sobre las tareas.
 export async function conversando(q, { minutos, now = Date.now() } = {}) {
   const c = await config(q);
   const hasta = now + (Number.isFinite(Number(minutos)) ? Math.max(0, Math.min(30, Number(minutos))) : c.pausa_conversacion_min) * 60_000;
@@ -237,6 +250,7 @@ export async function conversando(q, { minutos, now = Date.now() } = {}) {
   return hasta;
 }
 
+// Datos de la pestaña Infraestructura: agentes, tokens, eventos recientes y pausa.
 export async function infra(q, { tz, now = Date.now() }) {
   const [ag, tok, ev, conv] = await Promise.all([
     q.query("SELECT a.*, i.title AS tarea FROM agentes a LEFT JOIN items i ON i.id=a.item_id ORDER BY visto DESC"),
@@ -322,6 +336,7 @@ export function rutas(app, { pool, tx, need, wrap, done, changed, tz }) {
 // ---------- Herramientas MCP ----------
 // «disponibilidad» siempre está; las de la cola de agentes solo con la Infraestructura encendida.
 const HEX = /^[0-9a-f]{6,36}$/i;
+// Encuentra una tarea por id corto o parte del título (para MCP y WhatsApp).
 async function buscarTareaAgente(q, ref) {
   ref = String(ref || "").trim();
   if (!ref) throw new core.HttpError(400, "Dime qué tarea (id o parte del título).");
@@ -332,6 +347,7 @@ async function buscarTareaAgente(q, ref) {
   if (r.rowCount > 1) throw new core.HttpError(400, `«${ref}» coincide con más de una tarea: usa el id.`);
   return r.rows[0].id;
 }
+// Una línea de texto por tarea de la cola, para respuestas por chat.
 const lineaCola = (t) => `[${t.id.slice(0, 6)}] ${t.title}${t.proyecto ? ` [${t.proyecto}]` : ""} — ${ESTADO_TXT[t.estado] || t.estado}${t.prioridad ? `, P${t.prioridad}` : ""}${t.carril === "cloud" ? (t.cloud_ok ? ", cloud ✓" : ", cloud sin autorizar") : ""}${t.ventana === "noche" ? ", de noche" : ""}`;
 const ESTADO_TXT = { cola: "en cola", trabajando: "trabajando", revision: "espera tu OK", bloqueada: "bloqueada", aprobada: "aprobada", rechazada: "rechazada" };
 
@@ -353,6 +369,7 @@ export const MCP_AGENTES = [
     inputSchema: { type: "object", properties: { tarea: { type: "string" }, respuesta_textual: { type: "string", description: "Lo que respondió el usuario, tal cual" } }, required: ["tarea", "respuesta_textual"] } },
 ];
 
+// Implementación de las herramientas MCP de agentes (delegar, cola, aprobar, corregir, autorizar cloud).
 export function mcpRun(pool, { tz, tx }) {
   const quien = "mcp";
   return {

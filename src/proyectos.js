@@ -2,9 +2,11 @@
 import { HttpError, enqueue } from "./core.js";
 import { log } from "./db.js";
 
+// Texto recortado a n caracteres.
 const txt = (v, n = 300) => String(v ?? "").trim().slice(0, n);
 const ESTADOS = ["activo", "pausado", "terminado", "archivado"];
 
+// Crea un pilar.
 export async function crearPilar(q, { nombre, color = null, notas = "" }) {
   nombre = txt(nombre, 120);
   if (!nombre) throw new HttpError(400, "Ponle nombre al pilar.");
@@ -13,6 +15,7 @@ export async function crearPilar(q, { nombre, color = null, notas = "" }) {
   return r.rows[0];
 }
 
+// Edita un pilar.
 export async function editarPilar(q, id, p) {
   const prev = (await q.query("SELECT * FROM pilares WHERE id=$1", [id])).rows[0];
   if (!prev) throw new HttpError(404, "No existe ese pilar.");
@@ -22,6 +25,7 @@ export async function editarPilar(q, id, p) {
   return r.rows[0];
 }
 
+// Crea un proyecto (con pilar y fecha límite opcionales).
 export async function crearProyecto(q, { nombre, pilar_id = null, fecha_limite = null, minutos_plan = null, color = null, notas = "" }) {
   nombre = txt(nombre, 160);
   if (!nombre) throw new HttpError(400, "Ponle nombre al proyecto.");
@@ -32,6 +36,7 @@ export async function crearProyecto(q, { nombre, pilar_id = null, fecha_limite =
   return r.rows[0];
 }
 
+// Edita un proyecto (estado, pilar, fechas, notas).
 export async function editarProyecto(q, id, p) {
   const prev = (await q.query("SELECT * FROM proyectos WHERE id=$1", [id])).rows[0];
   if (!prev) throw new HttpError(404, "No existe ese proyecto.");
@@ -70,11 +75,13 @@ export async function listar(q, { incluirArchivados = false } = {}) {
   };
 }
 
+// Asigna una tarea a un proyecto.
 export async function asignar(q, itemId, proyectoId) {
   const r = await q.query("UPDATE items SET proyecto_id=$2, updated_at=now() WHERE id=$1 RETURNING id", [itemId, proyectoId || null]);
   if (!r.rowCount) throw new HttpError(404, "No existe esa tarea.");
 }
 
+// Busca un proyecto por nombre aproximado.
 export async function buscarProyecto(q, texto) {
   const t = txt(texto, 160).toLowerCase();
   if (!t) return null;
