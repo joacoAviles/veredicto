@@ -82,6 +82,7 @@ MODELO_LOCAL=qwen3.5:9b-64k DUENO="Tu nombre" bash veredicto/integraciones/herme
 | `CARPETA_TRABAJO` | Dónde dejan sus archivos los agentes. Por defecto `~/Veredicto-agentes`. |
 | `CANAL` | Adónde llegan el brief y los avisos: `whatsapp` (por defecto), `telegram`, etc. |
 | `CARRIL_CLOUD=no` | No instala el trabajador cloud. |
+| `PROYECTOS` | Ruta a un `proyectos.json` (`{"proyectos": [{"nombre": "…", "ruta": "…"}]}`). Cada tarea corre en la carpeta de su proyecto: Hermes carga el `AGENTS.md` de ahí y deja lo que produce en `salidas/`. |
 
 Después, en tu chat de ese canal, manda `/sethome` para que el brief y los avisos lleguen ahí.
 

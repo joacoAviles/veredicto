@@ -9,6 +9,7 @@
 #   DUENO             tu nombre, como lo usarán las skills (por defecto: tu nombre de usuario)
 #   CARPETA_TRABAJO   dónde dejan sus archivos los agentes (por defecto ~/Veredicto-agentes)
 #   CANAL             adónde llegan el brief y los avisos (por defecto whatsapp; ej. telegram)
+#   PROYECTOS         ruta a un proyectos.json: cada tarea corre en la carpeta de su proyecto (con su AGENTS.md)
 #   CARRIL_CLOUD=no   no instala el trabajador cloud
 #
 # Antes: en Veredicto → Ajustes → Módulos, activa «Infraestructura»; luego Infra → Agentes y
@@ -91,6 +92,7 @@ for c in $CARRILES; do
     <key>VEREDICTO_MODELO</key><string>$MOD</string>
     <key>VEREDICTO_DUENO</key><string>$DUENO</string>
     <key>VEREDICTO_CARPETA_TRABAJO</key><string>$CARPETA_TRABAJO</string>
+    <key>VEREDICTO_PROYECTOS</key><string>${PROYECTOS:-}</string>
   </dict>
   <key>StandardOutPath</key><string>$HH/logs/veredicto-$c.log</string>
   <key>StandardErrorPath</key><string>$HH/logs/veredicto-$c.log</string>
@@ -112,6 +114,7 @@ Environment=HERMES_BIN=$HERMES_BIN
 Environment=VEREDICTO_MODELO=$MOD
 Environment=VEREDICTO_DUENO=$DUENO
 Environment=VEREDICTO_CARPETA_TRABAJO=$CARPETA_TRABAJO
+Environment=VEREDICTO_PROYECTOS=${PROYECTOS:-}
 ExecStart=$PY $DEST/trabajador.py $c
 StandardOutput=append:$HH/logs/veredicto-$c.log
 StandardError=append:$HH/logs/veredicto-$c.log
