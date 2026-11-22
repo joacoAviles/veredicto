@@ -22,11 +22,13 @@ export const enqueueFlujo = (q, { itemId = null, bloqueId = null }) =>
 // Serializa todo lo que toca la actividad abierta.
 export const lockTimer = (q) => q.query("SELECT pg_advisory_xact_lock(4317001)");
 
+// Sesión de tiempo abierta (corriendo o en pausa), bloqueada para actualizar.
 export async function openSession(q) {
   const r = await q.query("SELECT * FROM sessions WHERE state IN ('running','paused') FOR UPDATE");
   return r.rows[0] || null;
 }
 
+// Milisegundos medidos de una sesión sumando sus tramos.
 async function measuredMs(q, sessionId) {
   const r = await q.query(
     "SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (COALESCE(ended_at, now()) - started_at))),0)::float AS s FROM segments WHERE session_id=$1",
@@ -35,6 +37,7 @@ async function measuredMs(q, sessionId) {
   return r.rows[0].s * 1000;
 }
 
+// Termina la sesión abierta y la registra.
 export async function stop(q, { now = new Date() } = {}) {
   const s = await openSession(q);
   if (!s) return null;
@@ -54,6 +57,7 @@ export async function stop(q, { now = new Date() } = {}) {
   return { ...s, state: "done", ms };
 }
 
+// Pausa la sesión que corre.
 export async function pause(q, { now = new Date() } = {}) {
   const s = await openSession(q);
   if (!s || s.state !== "running") throw new HttpError(409, "No hay nada corriendo.");
@@ -63,6 +67,7 @@ export async function pause(q, { now = new Date() } = {}) {
   return s;
 }
 
+// Reanuda la sesión en pausa.
 export async function resume(q, { now = new Date() } = {}) {
   const s = await openSession(q);
   if (!s || s.state !== "paused") throw new HttpError(409, "No hay nada en pausa.");
@@ -85,6 +90,7 @@ export async function findItem(q, title) {
   return r.rows.map((it) => [score(it), it]).filter(([s]) => s).sort((a, b) => b[0] - a[0])[0]?.[1] || null;
 }
 
+// Crea una tarea o rutina validando nombre, duración y fecha.
 export async function createItem(q, { kind = "tarea", title, est_min = 30, due_date = null, hora = null, dias = null, proyecto_id = null, eisenhower = null }) {
   title = String(title || "").trim().slice(0, 300);
   if (!title) throw new HttpError(400, "Falta el nombre.");
@@ -97,8 +103,10 @@ export async function createItem(q, { kind = "tarea", title, est_min = 30, due_d
   return r.rows[0];
 }
 export const EISEN = ["Hacer ya", "Agendar", "Delegar", "Eliminar"];
+// Minutos entre 1 y 1440 (30 por defecto).
 const clampMin = (v) => Math.max(1, Math.min(1440, Math.round(Number(v) || 30)));
 
+// Actualiza los campos permitidos de una tarea o rutina.
 export async function updateItem(q, id, patch) {
   const allowed = { title: 1, status: 1, est_min: 1, due_date: 1, hora: 1, dias: 1, agendable: 1, proyecto_id: 1, eisenhower: 1 };
   const sets = [], vals = [id];
@@ -159,6 +167,7 @@ export async function start(q, { itemId = null, title = null, source = "app", no
   return { session: s, item };
 }
 
+// Guarda una captura rápida (texto o nota larga) desde la app o un atajo.
 export async function capture(q, { text, kind = "captura", body = "", source = "app" }) {
   text = String(text || "").trim();
   if (!text) throw new HttpError(400, "Escribe algo para guardar.");
@@ -176,6 +185,7 @@ export async function capture(q, { text, kind = "captura", body = "", source = "
   return r.rows[0];
 }
 
+// Agrega un bloque a la agenda (de una tarea o con título libre).
 export async function addBlock(q, { itemId = null, title = null, starts_at, ends_at, origin = "manual" }) {
   let t = title;
   if (itemId) {

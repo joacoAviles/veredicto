@@ -12,6 +12,7 @@ import { reciente } from "./sync/activitywatch.js";
 
 export const DEFAULTS = { activo: true, desde: "08:00", hasta: "23:30", niveles: [10, 30, 60], repetir: 10, canales: {} };
 
+// Si un minuto del día cae en la ventana desde–hasta.
 export function inWindow(m, desde, hasta) {
   const a = hhmmToMin(desde), b = hhmmToMin(hasta);
   return a <= b ? m >= a && m < b : m >= a || m < b;
@@ -24,8 +25,11 @@ export function windowStart(now, tz, desde, hasta) {
   return atMinute(day, a, tz);
 }
 
+// Si hay algún canal de avisos configurado.
 const hayCanal = (c) => !!(c?.ntfy?.topic || (c?.telegram?.token && c?.telegram?.chat) || c?.webhook?.url);
+// Milisegundos que lleva corriendo la sesión.
 const msCorriendo = (c, now) => c.segments.reduce((a, [x, y]) => a + ((y || now) - x), 0);
+// Datos mínimos para la acción firmada (item o título).
 const datosDe = (o) => (o.item_id ? { item_id: o.item_id } : { title: o.title });
 
 // Convierte un evento + variables en un aviso usando su plantilla.
@@ -123,6 +127,7 @@ export function decide(ctx) {
   return r || { aviso: null, st: { ...st, nivel, ultimo: now }, motivo: `nivel ${nivel} (aviso apagado)` };
 }
 
+// Desde cuándo no se registra nada (inactividad).
 async function idleSince(q, current, now, tz, cfg) {
   let last = 0;
   if (current?.state === "paused") last = Math.max(...current.segments.map((s) => s[1] || 0));
@@ -131,12 +136,14 @@ async function idleSince(q, current, now, tz, cfg) {
   return Math.max(last, e, windowStart(now, tz, cfg.desde, cfg.hasta));
 }
 
+// Bloques y eventos con hora, en una sola lista.
 const timed = (agenda) => [
   ...agenda.blocks.map((b) => ({ key: `b:${b.id}`, item_id: b.item_id, title: b.title, start: b.start, end: b.end })),
   ...agenda.events.filter((e) => !e.all_day).map((e) => ({ key: `e:${e.uid}:${e.start}`, item_id: null, title: e.title, start: e.start, end: e.end })),
 ];
 // Lo que está ocurriendo ahora (bloques tuyos primero, luego el calendario).
 export const agendadoAhora = (agenda, now) => timed(agenda).find((x) => x.start <= now && x.end > now) || null;
+// Lo que empieza dentro de los próximos `min` minutos.
 export const proximoEn = (agenda, now, min) => timed(agenda).filter((x) => x.start > now && x.start <= now + min * 60000).sort((a, b) => a.start - b.start)[0] || null;
 
 // Firma los botones, agrega el ícono del equipo y manda por todos los canales.
@@ -154,6 +161,7 @@ export async function entregar(pool, cfg, aviso, { publicUrl, plantillas, send =
   return { envio, final };
 }
 
+// Revisa el momento y manda los avisos que correspondan (empezar, parar, inactividad).
 export async function vigilar(pool, { tz, publicUrl, themeDir, now = Date.now(), send = enviar }) {
   const cfg = { ...DEFAULTS, ...(await getSetting(pool, "avisos", {})) };
   const plantillas = await loadPlantillas(pool, themeDir);

@@ -20,15 +20,20 @@ function h(tag, attrs = {}, ...kids) {
   for (const c of kids.flat(Infinity)) if (c != null && c !== false) el.append(c.nodeType ? c : String(c));
   return el;
 }
+// Duración como reloj HH:MM:SS.
 const fmtDur = (ms) => {
   const s = Math.max(0, Math.floor(ms / 1000)), hh = Math.floor(s / 3600), mm = Math.floor((s % 3600) / 60), ss = s % 60;
   return hh ? `${hh}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}` : `${mm}:${String(ss).padStart(2, "0")}`;
 };
+// Duración corta (45 min, 1 h 20).
 const fmtCorto = (ms) => { const m = Math.round(ms / 60000); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}`; };
+// Hora HH:MM en la zona del servidor.
 const hora = (ms) => new Intl.DateTimeFormat("es-CL", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: sesion?.tz }).format(ms);
+// Fecha larga en español.
 const fecha = (ms) => new Intl.DateTimeFormat("es-CL", { weekday: "long", day: "numeric", month: "long", timeZone: sesion?.tz }).format(ms);
 const DIAS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
 
+// Muestra un aviso breve (rojo si es error).
 function toast(msg, error = false) {
   const t = $("#aviso");
   t.textContent = msg;
@@ -38,6 +43,7 @@ function toast(msg, error = false) {
   toast.t = setTimeout(() => (t.hidden = true), error ? 5000 : 2200);
 }
 
+// fetch a la API con JSON y errores legibles.
 async function api(path, { method = "GET", body } = {}) {
   const r = await fetch(path, {
     method, credentials: "same-origin",
@@ -60,6 +66,7 @@ async function act(btn, fn, okMsg) {
 
 // ---------- en vivo ----------
 let es = null, refrescando = null;
+// Vuelve a pedir el estado y repinta (agrupa llamadas seguidas).
 async function refrescar() {
   clearTimeout(refrescando);
   refrescando = setTimeout(async () => {
@@ -75,6 +82,7 @@ async function refrescar() {
     } catch {}
   }, 120);
 }
+// Escucha /api/eventos (SSE) para refrescar al haber cambios.
 function conectarEnVivo() {
   if (es) es.close();
   es = new EventSource("/api/eventos");
@@ -106,6 +114,7 @@ async function inicio() {
 }
 window.addEventListener("hashchange", () => { document.querySelectorAll("dialog.dialogo").forEach((d) => d.remove()); render(); });
 
+// Pinta la vista según el hash de la URL.
 function render() {
   clearInterval(tick);
   if (!sesion.dentro) { $("#nav").hidden = true; vista.replaceChildren(sesion.cuenta ? vistaEntrar() : vistaInstalar()); return; }
@@ -143,6 +152,7 @@ function vistaInstalar() {
       location.hash = "#ajustes"; await inicio();
     }) }, "Crear cuenta"));
 }
+// Pantalla de ingreso o creación de cuenta.
 function vistaEntrar() {
   const pw = h("input", { id: "pw", type: "password", autocomplete: "current-password" });
   const go = (e) => act(e?.target, async () => { await api("/api/entrar", { method: "POST", body: { password: pw.value } }); await inicio(); });
@@ -153,6 +163,7 @@ function vistaEntrar() {
 // ---------- Hoy ----------
 function msActual(c) { return c.segments.reduce((a, [x, y]) => a + ((y || Date.now()) - x), 0); }
 
+// Tarjeta de lo que corre ahora, con su reloj y botones.
 function tarjetaAhora() {
   const c = S.current;
   if (c) {
@@ -173,8 +184,10 @@ function tarjetaAhora() {
     h("div", { class: "reloj" }, ult ? `${fmtCorto(Date.now() - ult)} sin registrar` : "Sin registrar"));
 }
 
+// Inicia una sesión con los datos dados.
 function iniciarPor(datos, btn) { return act(btn, () => api("/api/iniciar", { method: "POST", body: datos })); }
 
+// Vista Hoy: qué hacer ahora, agenda del día, sugerencias y tareas.
 function vistaHoy() {
   const now = Date.now();
   const input = h("input", { id: "que", list: "items-lista", placeholder: "¿Qué estás haciendo?", autocomplete: "off", enterkeyhint: "go" });
@@ -231,8 +244,11 @@ function filaAgenda(x, now, { conDia = false } = {}) {
     x.tipo === "bloque" ? h("button", { class: "icono", title: "Quitar", "aria-label": "Quitar bloque", onclick: (e) => act(e.target, () => api(`/api/bloques/${x.id}`, { method: "DELETE" })) }, "✕") : null,
   );
 }
+// Día corto (lun 3).
 const diaCorto = (ms) => new Intl.DateTimeFormat("es-CL", { weekday: "short", day: "numeric", timeZone: sesion?.tz }).format(ms);
+// HH:MM de un instante.
 const hhmmDe = (ms) => new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: sesion?.tz }).format(ms);
+// AAAA-MM-DD de un instante.
 const fechaDe = (ms) => new Intl.DateTimeFormat("en-CA", { timeZone: sesion?.tz }).format(ms);
 // Fecha AAAA-MM-DD + HH:MM en la zona del servidor → milisegundos.
 function enZona(fecha, hhmm) {
@@ -241,6 +257,7 @@ function enZona(fecha, hhmm) {
   return guess - off;
 }
 
+// Formulario para editar un bloque de la agenda.
 function editarAgenda(x) {
   const t = h("input", { id: "ed-t", value: x.title });
   const f = h("input", { id: "ed-f", type: "date", value: fechaDe(x.start) });
@@ -269,6 +286,7 @@ function editarAgenda(x) {
 
 // ---------- Agenda de la semana ----------
 let semana = null, semanaDesde = null;
+// Vista Agenda de la semana.
 function vistaAgenda() {
   if (!semana) {
     api(`/api/agenda?dias=7${semanaDesde ? `&desde=${semanaDesde}` : ""}`).then((r) => { semana = r; render(); }).catch((e) => toast(e.message, true));
@@ -294,6 +312,7 @@ function vistaAgenda() {
   ];
 }
 
+// Arma el día con las sugerencias.
 async function armar(e) {
   const btn = e.target;
   btn.disabled = true;
@@ -305,6 +324,7 @@ async function armar(e) {
   } catch (err) { toast(err.message, true); } finally { btn.disabled = false; }
 }
 
+// Formulario para agregar un bloque.
 function formBloque() {
   const t = h("input", { id: "b-que", placeholder: "Qué", list: "items-lista" });
   const ini = h("input", { id: "b-ini", type: "time", value: proximaMediaHora() });
@@ -317,6 +337,7 @@ function formBloque() {
       act(e.target, () => api("/api/bloques", { method: "POST", body: { title: t.value.trim(), inicio, fin } }), "Agendado.");
     } }, "Agendar"));
 }
+// Próxima media hora redonda como HH:MM.
 function proximaMediaHora() { const d = new Date(Date.now() + 30 * 60000); d.setMinutes(d.getMinutes() < 30 ? 30 : 60, 0, 0); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; }
 // Hoy a las HH:MM en la zona del servidor (se asume la misma que la del teléfono; si difiere, se corrige con el desfase).
 function hoyA(hhmm) {
@@ -328,6 +349,7 @@ function hoyA(hhmm) {
   return local - (enZona - enAqui);
 }
 
+// Resumen del tiempo en el computador por app.
 function resumenTramos(tramos) {
   if (!tramos.length) return h("p", { class: "vacio" }, "Todavía nada.");
   const por = new Map();
@@ -427,6 +449,7 @@ function vistaGestiones() {
 
 // ---------- Registro ----------
 let registro = null, registroDias = 7;
+// Vista Registro: lo hecho por día y proyecto.
 function vistaRegistro() {
   if (!registro) { api(`/api/registro?dias=${registroDias}`).then((r) => { registro = r; render(); }).catch((e) => toast(e.message, true)); return h("p", { class: "cargando" }, "Cargando…"); }
   const porDia = new Map();
@@ -462,6 +485,7 @@ function vistaRegistro() {
 
 // ---------- Ajustes y asistente ----------
 let avisosCfg = null, tokenNuevo = null, feedUrl = null, cuentasCfg = null, conectando = null, conflictosLista = null;
+// Vista Ajustes.
 function vistaAjustes() {
   if (!avisosCfg) { api("/api/avisos").then((r) => { avisosCfg = r; render(); }).catch((e) => toast(e.message, true)); return h("p", { class: "cargando" }, "Cargando…"); }
   const cx = S.conexiones;
@@ -514,6 +538,7 @@ function vistaAjustes() {
 
 // ---------- Tokens activos (atajos, carpetas, agentes): revocar uno no afecta a los demás ----------
 let tokensLista = null;
+// Lista y revoca tokens de acceso.
 function tarjetaTokens() {
   if (!tokensLista) { api("/api/tokens").then((r) => { tokensLista = r; render(); }).catch(() => {}); return null; }
   if (!tokensLista.length) return null;
@@ -526,6 +551,7 @@ function tarjetaTokens() {
 
 // ---------- Carpeta sincronizada: tus pendientes en un .md de tu computador ----------
 let tokenCarpeta = null;
+// Instrucciones y token para la carpeta sincronizada.
 function tarjetaCarpeta() {
   const base = tokenCarpeta?.base || location.origin;
   const script = "https://raw.githubusercontent.com/joacoAviles/veredicto/main/integraciones/carpeta/veredicto-carpeta.py";
@@ -542,6 +568,7 @@ python3 veredicto-carpeta.py instalar`),
         h("button", { class: "primario", onclick: (e) => act(e.target, async () => { tokenCarpeta = await api("/api/tokens", { method: "POST", body: { label: $("#tok-carpeta").value || "Carpeta", alcance: "carpeta" } }); tokensLista = null; }) }, "Crear token")));
 }
 
+// Ajustes de avisos (ntfy, Telegram, webhook y horario).
 function pasoAvisos() {
   const a = avisosCfg, c = a.canales;
   const topic = h("input", { id: "ntfy-topic", value: c.ntfy?.topic || a.sugerido_ntfy });
@@ -580,14 +607,17 @@ function pasoAvisos() {
 
 const ROLES = { leer: "Mostrar", plan: "Plan (tus bloques)", registrado: "Registrado (lo medido)", oculto: "Ocultar" };
 const TIPOS = { caldav: "CalDAV", google: "Google", outlook: "Outlook", markdown: "Markdown", notion: "Notion" };
+// Vuelve a pedir las cuentas conectadas.
 const recargarCuentas = async () => { cuentasCfg = await api("/api/cuentas"); };
 
+// Texto de estado de una cuenta conectada.
 function estadoCuenta(c) {
   if (!c.activa) return "esperando permiso";
   if (c.ultimo_error) return `✗ ${c.ultimo_error}`;
   return c.ultimo_ok ? `al día · ${hora(new Date(c.ultimo_ok).getTime())}` : "sincronizando…";
 }
 
+// Conectar calendarios (iCloud/CalDAV, Google, Outlook).
 function pasoCalendarios() {
   const cals = cuentasCfg.cuentas.filter((c) => ["caldav", "google", "outlook"].includes(c.tipo));
   const tienePlan = cals.some((c) => c.calendarios.some((k) => k.rol === "plan"));
@@ -659,6 +689,7 @@ function pasoCalendarios() {
   ];
 }
 
+// Formulario de cliente OAuth (Google/Outlook).
 function oauthForm(tipo, pasos) {
   const id = h("input", { id: `${tipo}-id`, autocomplete: "off" }), sec = h("input", { id: `${tipo}-sec`, type: "password", autocomplete: "off" });
   return [
@@ -671,6 +702,7 @@ function oauthForm(tipo, pasos) {
   ];
 }
 
+// Conectar notas (carpeta Markdown o Notion).
 function pasoNotas() {
   const notas = cuentasCfg.cuentas.filter((c) => c.tipo === "markdown" || c.tipo === "notion");
   const carpeta = h("input", { id: "md-dir", value: cuentasCfg.carpeta_notas });
@@ -701,6 +733,7 @@ function pasoNotas() {
   ];
 }
 
+// Estado de la sincronización por cuenta.
 function tarjetaSync() {
   const cx = S.conexiones;
   if (!cx.cuentas.length) return null;
@@ -715,6 +748,7 @@ function tarjetaSync() {
       h("button", { class: "icono", title: "Entendido", onclick: (e) => act(e.target, async () => { await api(`/api/conflictos/${c.id}/revisado`, { method: "POST" }); conflictosLista = await api("/api/conflictos"); }) }, "✓")))) : null);
 }
 
+// Atajos de iPhone: token y URLs.
 function pasoAtajos() {
   const base = tokenNuevo?.base || location.origin;
   const t = tokenNuevo?.token;
@@ -749,6 +783,7 @@ function pasoAtajos() {
 // ---------- Avisos: plantillas ----------
 let PL = null;
 const PRIORIDADES = { 1: "1 · mínima (sin sonido)", 2: "2 · baja", 3: "3 · normal", 4: "4 · alta", 5: "5 · urgente (insiste)" };
+// Editor de textos de los avisos.
 function vistaPlantillas() {
   if (!PL) { api("/api/plantillas").then((r) => { PL = r; render(); }).catch((e) => toast(e.message, true)); return h("p", { class: "cargando" }, "Cargando…"); }
   const E = PL.efectivas, tuyas = PL.tuyas.eventos || {};
@@ -801,6 +836,7 @@ function vistaPlantillas() {
 // ---------- Qué aprende el algoritmo ----------
 let PR = null;
 const MODOS = { agendar: "Agendar solo", sugerir: "Solo sugerir", nunca: "Ignorar" };
+// Ajustes del algoritmo de sugerencias.
 function vistaAlgoritmo() {
   if (!PR) { api("/api/prediccion").then((r) => { PR = r; render(); }).catch((e) => toast(e.message, true)); return h("p", { class: "cargando" }, "Cargando…"); }
   const c = PR.config;
@@ -844,6 +880,7 @@ const PASOS_B = [
   { k: "atajos", nav: "Atajos", icono: "⌚", titulo: "Siri, reloj y tu asistente", por: "Inicia y para sin abrir la app: un toque en el reloj, «Oye Siri, Veredicto», o pídeselo a Claude." },
   { k: "listo", nav: "Listo" },
 ];
+// Bienvenida guiada, paso n.
 function vistaBienvenida(n) {
   if (!avisosCfg) { api("/api/avisos").then((r) => { avisosCfg = r; render(); }).catch((e) => toast(e.message, true)); return h("p", { class: "cargando" }, "Cargando…"); }
   if (!cuentasCfg) { api("/api/cuentas").then((r) => { cuentasCfg = r; render(); }).catch((e) => toast(e.message, true)); return h("p", { class: "cargando" }, "Cargando…"); }
@@ -911,11 +948,14 @@ function vistaBienvenida(n) {
 
 // ---------- Proyectos ----------
 const EISEN = ["Hacer ya", "Agendar", "Delegar", "Eliminar"];
+// Nombre de un proyecto por id.
 const nombreProyecto = (id) => (id ? S.proyectos.find((p) => p.id === id)?.nombre || "" : "");
+// Selector de proyecto.
 function selectorProyecto(id, actual = null) {
   if (!S.proyectos.length) return null;
   return h("select", { id }, h("option", { value: "" }, "Sin proyecto"), S.proyectos.map((p) => h("option", { value: p.id, selected: p.id === actual }, p.nombre)));
 }
+// Banda que avisa que hay datos de ejemplo.
 function bandaDemo() {
   return h("div", { class: "banda-demo" },
     h("span", { class: "crece" }, h("b", {}, "Datos de ejemplo. "), "Recorre todo sin miedo: nada de esto sale a tus calendarios ni a Notion."),
@@ -923,6 +963,7 @@ function bandaDemo() {
 }
 const ESTADOS_P = { activo: "Activo", pausado: "Pausado", terminado: "Terminado", archivado: "Archivado" };
 let PJ = null, pjAbierto = null, pjForm = null;
+// Vista Proyectos y pilares.
 function vistaProyectos() {
   if (!PJ) { api("/api/proyectos").then((r) => { PJ = r; render(); }).catch((e) => toast(e.message, true)); return h("p", { class: "cargando" }, "Cargando…"); }
   const ps = PJ.proyectos.filter((p) => p.estado !== "archivado");
@@ -993,6 +1034,7 @@ function vistaProyectos() {
 
 // ---------- Computador (ActivityWatch) ----------
 let AWD = null, awSel = new Set();
+// Tiempo en el computador (ActivityWatch).
 function tarjetaComputador() {
   const aw = S.activitywatch;
   if (!AWD) { api("/api/actividad").then((r) => { AWD = r; awSel = new Set(); render(); }).catch(() => { AWD = { tramos: [], apps: [], total_ms: 0, sin_registrar_ms: 0 }; render(); }); return null; }
@@ -1021,6 +1063,7 @@ function tarjetaComputador() {
         }, "Registrado."); } }, "Registrar lo marcado"))) : null);
 }
 
+// Conectar ActivityWatch.
 function pasoComputador() {
   const aw = S.activitywatch;
   const url = h("input", { id: "aw-url", value: aw?.url || "", placeholder: "http://192.168.68.20:5600", autocomplete: "off", inputmode: "url" });
@@ -1045,6 +1088,7 @@ function pasoComputador() {
 
 // ---------- Asistente (MCP): Claude, Aurora u otro ----------
 let tokenMcp = null;
+// Conectar un asistente por MCP (token y URL).
 function pasoAsistente() {
   const base = (tokenMcp?.base || location.origin).replace(/\/$/, "");
   const t = tokenMcp?.token;
@@ -1070,6 +1114,7 @@ function pasoAsistente() {
 
 // ---------- Notion: las 9 bases del Juez ----------
 let importando = null;
+// Estado de las 9 bases de Notion e importación.
 function basesNotion(c) {
   const e = c.espejo || {};
   const imp = cuentasCfg.importacion?.cuenta === c.id ? cuentasCfg.importacion : null;
@@ -1097,16 +1142,21 @@ let INF = null, INFcola = null, tokenAgente = null;
 const borrador = { title: "", proyecto_id: "", prioridad: "3", carril: "local", ventana: "dia", detalle: "" };
 const ESTADO_TXT = { cola: "En cola", trabajando: "Trabajando", revision: "Espera tu OK", bloqueada: "Bloqueada", aprobada: "Aprobada", rechazada: "Rechazada" };
 const P_TXT = { 1: "P1 · urgente", 2: "P2 · importante", 3: "P3 · normal", 4: "P4 · cuando se pueda" };
+// Hace cuánto (hace 5 min).
 const haceTxt = (ms) => { const m = Math.round((Date.now() - ms) / 60000); return m < 1 ? "recién" : m < 60 ? `hace ${m} min` : m < 1440 ? `hace ${Math.round(m / 60)} h` : `hace ${Math.round(m / 1440)} d`; };
 
+// Pide los datos de la pestaña Infraestructura.
 function cargarInfra() {
   Promise.all([api("/api/infra"), api("/api/agente/tareas?asignado=agente&estado=cola,trabajando,revision,bloqueada&limite=200")])
     .then(([i, c]) => { INF = i; INFcola = c; render(); })
     .catch((e) => toast(e.message, true));
 }
+// Acción en Infraestructura y recarga.
 const infraAct = (btn, fn, msg) => act(btn, async () => { await fn(); INF = null; }, msg);
+// Cambia una tarea de agente.
 const patchTarea = (id, body) => api(`/api/agente/tareas/${id}`, { method: "PATCH", body });
 
+// Pestaña Infraestructura (tablero de agentes y ajustes).
 function vistaInfra() {
   const hoja = location.hash.split("/")[1] || "tablero";
   if (!INF) { cargarInfra(); return h("p", { class: "cargando" }, "Cargando…"); }
@@ -1116,6 +1166,7 @@ function vistaInfra() {
   return [h("section", { class: "tarjeta" }, h("h1", {}, "Infraestructura"), hojas), ...(hoja === "agentes" ? hojaAgentes() : hojaTablero())];
 }
 
+// Fila de una tarea en el tablero de agentes.
 function filaTarea(t) {
   const meta = [t.proyecto, t.prioridad ? `P${t.prioridad}` : null, t.carril === "cloud" ? (t.cloud_ok ? "cloud ✓" : "cloud · falta tu OK") : "local",
     t.ventana === "noche" ? "de noche" : null, t.due_date ? `vence ${t.due_date}` : null, t.agente ? `${t.agente}${t.desde ? " · " + haceTxt(t.desde) : ""}` : null].filter(Boolean).join(" · ");
@@ -1138,6 +1189,7 @@ function filaTarea(t) {
     t.estado === "cola" ? prio : null);
 }
 
+// Hoja Tablero: cola, trabajando, revisión y bloqueadas.
 function hojaTablero() {
   const c = INF.config;
   const campo = (k, el) => { el.addEventListener("input", () => (borrador[k] = el.value)); el.addEventListener("change", () => (borrador[k] = el.value)); return el; };
@@ -1182,6 +1234,7 @@ function hojaTablero() {
   ];
 }
 
+// Hoja Agentes: foco, noche, carriles y agentes activos.
 function hojaAgentes() {
   const c = INF.config;
   const foco = h("div", { class: "chips", id: "cf-foco" }, S.proyectos.length ? S.proyectos.map((p) => h("label", { class: "chip", style: "display:inline-flex;align-items:center;gap:.35em;margin:0" },

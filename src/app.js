@@ -30,8 +30,10 @@ import * as agentes from "./agentes.js";
 import * as carpeta from "./carpeta.js";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+// Si existe un archivo (sin lanzar error).
 const exists = (p) => access(p).then(() => true, () => false);
 
+// Arma la app Express: autenticación, API, atajos, sincronización, MCP y archivos públicos.
 export function createApp(pool, opts = {}) {
   const cfg = {
     tz: opts.tz || "America/Santiago",
@@ -857,8 +859,10 @@ export function createApp(pool, opts = {}) {
   return app;
 }
 
+// Escapa texto para insertarlo en HTML.
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const LABEL = { iniciar: "Iniciar", seguir: "Seguir", parar: "Parar", silenciar: "Silenciar" };
+// Página HTML mínima que confirma una acción firmada (botones de avisos).
 function actionPage(nombre, msg, token, d) {
   const what = d ? `${LABEL[d.a] || d.a}${d.p?.title ? " · " + d.p.title : ""}${d.p?.min ? ` ${d.p.min} min` : ""}` : "";
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(nombre)}</title><link rel="stylesheet" href="/base.css"><link rel="stylesheet" href="/theme.css"></head>

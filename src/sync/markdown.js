@@ -8,18 +8,21 @@ const IGNORAR = new Set([".obsidian", ".trash", ".git", "node_modules", ".stfold
 const TAREA = /^(\s*)([-*+]|\d+[.)])\s+\[( |x|X)\]\s+(.+?)\s*$/;
 const FECHA = /(?:📅|⏳|🛫)?\s*(\d{4}-\d{2}-\d{2})/;
 
+// Ruta dentro de la carpeta; rechaza salirse de ella.
 const seguro = (base, rel) => {
   const p = path.resolve(base, rel);
   if (!p.startsWith(path.resolve(base) + path.sep)) throw new Error("Ruta fuera de la carpeta de notas.");
   return p;
 };
 
+// Comprueba que la carpeta de notas exista.
 export async function verificar(cfg) {
   const s = await stat(cfg.carpeta).catch(() => null);
   if (!s?.isDirectory()) throw new Error(`No encuentro la carpeta ${cfg.carpeta} dentro del contenedor. Revisa el volumen en compose.yaml.`);
   return true;
 }
 
+// Archivos .md de la carpeta (recursivo, con límite).
 export async function listar(cfg, { max = 5000 } = {}) {
   const out = [];
   const walk = async (dir) => {
@@ -39,9 +42,12 @@ export async function listar(cfg, { max = 5000 } = {}) {
   return out;
 }
 
+// Texto de la tarea sin marcas de fecha ni de hecho.
 const limpio = (t) => t.replace(/\s*✅\s*\d{4}-\d{2}-\d{2}/g, "").replace(FECHA, "").replace(/\s+/g, " ").trim();
+// Id estable de una tarea Markdown (archivo + texto + ocurrencia).
 const idDe = (ref, texto, n) => createHash("sha1").update(`${ref}|${limpio(texto).toLowerCase()}|${n}`).digest("hex").slice(0, 20);
 
+// Tareas `- [ ]` de un archivo Markdown.
 export function tareas(ref, text) {
   const vistos = new Map();
   const out = [];
@@ -58,11 +64,13 @@ export function tareas(ref, text) {
   return out;
 }
 
+// Lee las tareas de un archivo de la carpeta.
 export async function leer(cfg, ref) {
   const text = await readFile(seguro(cfg.carpeta, ref), "utf8");
   return tareas(ref, text);
 }
 
+// Escribe un archivo de forma atómica (temporal + rename).
 async function escribirAtomico(file, text) {
   const tmp = `${file}.veredicto-${process.pid}.tmp`;
   await writeFile(tmp, text, "utf8");

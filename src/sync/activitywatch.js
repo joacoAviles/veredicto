@@ -5,12 +5,14 @@ import { getSetting, setSetting } from "../db.js";
 const MIN_TRAMO = 60_000;   // tramos de menos de 1 minuto no se guardan
 const UNIR = 90_000;        // misma app con pausas cortas = un solo tramo
 
+// GET a la API de ActivityWatch con tiempo límite.
 async function aw(url, path, fetcher = fetch) {
   const r = await fetcher(url.replace(/\/$/, "") + path, { signal: AbortSignal.timeout(15_000) });
   if (!r.ok) throw new Error(`ActivityWatch respondió ${r.status}`);
   return r.json();
 }
 
+// Prueba la conexión a ActivityWatch y encuentra sus buckets.
 export async function probar(url, fetcher = fetch) {
   let buckets;
   try { buckets = await aw(url, "/api/0/buckets/", fetcher); }
@@ -30,6 +32,7 @@ const activos = (afkEvents) => afkEvents
   .map((e) => { const a = Date.parse(e.timestamp); return [a, a + e.duration * 1000]; })
   .sort((x, y) => x[0] - y[0]);
 
+// Recorta un tramo a los períodos con actividad (sin AFK).
 function recortar([a, b], acts) {
   if (!acts) return [[a, b]];
   const out = [];
@@ -37,6 +40,7 @@ function recortar([a, b], acts) {
   return out;
 }
 
+// Quita del título de ventana el nombre del navegador.
 const limpiarTitulo = (t) => String(t || "").replace(/\s+[—–-]\s+(Google Chrome|Safari|Firefox|Arc|Brave|Microsoft Edge)$/i, "").slice(0, 160);
 
 // Convierte eventos de ventana en tramos por app (unidos si hay pausas cortas).

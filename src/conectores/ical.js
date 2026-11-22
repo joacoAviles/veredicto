@@ -4,9 +4,11 @@ import { zoned, isValidZone } from "../time.js";
 
 const DAY = 86_400_000;
 
+// Despliega las líneas plegadas de un iCalendar.
 function unfold(text) {
   return text.replace(/\r\n/g, "\n").replace(/\n[ \t]/g, "").split("\n");
 }
+// Separa una línea iCalendar en nombre, parámetros y valor.
 function parseLine(line) {
   const i = line.indexOf(":");
   if (i < 0) return null;
@@ -15,6 +17,7 @@ function parseLine(line) {
   const params = Object.fromEntries(ps.map((p) => { const j = p.indexOf("="); return [p.slice(0, j).toUpperCase(), p.slice(j + 1).replace(/^"|"$/g, "")]; }));
   return { name: name.toUpperCase(), params, value };
 }
+// Quita los escapes de texto de iCalendar.
 const unescape = (s) => s.replace(/\\n/gi, "\n").replace(/\\([,;\\])/g, "$1");
 
 // Algunos calendarios (Outlook) usan nombres de Windows; los más comunes en Latinoamérica.
@@ -27,6 +30,7 @@ const WIN = {
   "W. Europe Standard Time": "Europe/Berlin", "GMT Standard Time": "Europe/London", "UTC": "UTC",
 };
 
+// Fecha/hora iCalendar (con zona, UTC o día completo) a milisegundos.
 export function parseDate(value, params, defTz) {
   const v = value.trim();
   if (/^\d{8}$/.test(v) || params.VALUE === "DATE") {
@@ -42,6 +46,7 @@ export function parseDate(value, params, defTz) {
   return { ms: zoned(Y, M, D, h, mi, s, tz), allDay: false, tz, wall: [Y, M, D, h, mi, s] };
 }
 
+// Duración ISO 8601 (P1DT2H…) a milisegundos.
 function parseDuration(v) {
   const m = v.match(/^([+-])?P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/);
   if (!m) return 0;
@@ -49,6 +54,7 @@ function parseDuration(v) {
   return sign * (((+m[2] || 0) * 7 + (+m[3] || 0)) * DAY + (+m[4] || 0) * 3600e3 + (+m[5] || 0) * 60e3 + (+m[6] || 0) * 1e3);
 }
 
+// Lee un .ics y devuelve sus eventos (con reglas de repetición).
 export function parseICS(text, defTz) {
   const events = [];
   let cur = null;
@@ -147,6 +153,7 @@ export function expand(events, from, to, defTz) {
   return out;
 }
 
+// Actualiza los calendarios suscritos por URL .ics.
 export async function refreshCalendars(pool, tz, { fetcher = fetch, now = Date.now() } = {}) {
   const cals = (await pool.query("SELECT * FROM calendars WHERE cuenta_id IS NULL AND url IS NOT NULL")).rows;
   const from = now - DAY, to = now + 14 * DAY;

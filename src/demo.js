@@ -17,6 +17,7 @@ const TAREAS = [
 const RUTINAS = [["Transporte", "08:10", 50, [1, 2, 3, 4, 5]], ["Almuerzo", "13:30", 45, null], ["Gimnasio", "19:00", 60, [1, 3, 5]], ["Revisión del día", "22:00", 15, null]];
 const CAPTURAS = ["Idea: serie sobre carburadores", "Llamar al taller por la revisión técnica", "Video: 5 errores del primer vuelo solo"];
 
+// Carga datos de ejemplo (proyectos, tareas, rutinas y 3 semanas de registro).
 export async function cargar(pool, tz, now = Date.now()) {
   const c = await pool.connect();
   try {
@@ -84,6 +85,7 @@ export async function cargar(pool, tz, now = Date.now()) {
   } catch (e) { await c.query("ROLLBACK"); throw e; } finally { c.release(); }
 }
 
+// Borra todos los datos de ejemplo.
 export async function borrar(pool) {
   const c = await pool.connect();
   try {

@@ -12,6 +12,7 @@ export async function enviar(canales, aviso, { fetcher = fetch } = {}) {
   return res;
 }
 
+// Envía un aviso por ntfy, con botones de acción.
 async function ntfy(c, a, fetcher) {
   const server = (c.server || "https://ntfy.sh").replace(/\/$/, "");
   const r = await fetcher(server, {
@@ -31,6 +32,7 @@ async function ntfy(c, a, fetcher) {
   if (!r.ok) throw new Error(`ntfy respondió ${r.status}`);
 }
 
+// Envía un aviso por Telegram; los botones abren enlaces firmados.
 async function telegram(c, a, fetcher) {
   // Telegram no hace POST desde un botón: los botones abren el enlace firmado (GET).
   const keyboard = (a.acciones || []).slice(0, 3).map((x) => [{ text: x.label.slice(0, 40), url: x.url }]);
@@ -46,6 +48,7 @@ async function telegram(c, a, fetcher) {
   if (!r.ok) throw new Error(`Telegram respondió ${r.status}: ${(await r.text()).slice(0, 120)}`);
 }
 
+// Envía el aviso como JSON a un webhook.
 async function webhook(c, a, fetcher) {
   const r = await fetcher(c.url, {
     method: "POST",

@@ -7,8 +7,10 @@ import * as proyectos from "./proyectos.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
+// Filtra una lista dejando solo UUID válidos.
 const ids = (xs) => (Array.isArray(xs) ? xs : []).map(String).filter((x) => UUID.test(x)).slice(0, 500);
 
+// Tareas pendientes para la carpeta sincronizada (Pendientes.md).
 export async function pendientes(q) {
   const r = await q.query(
     `SELECT i.id, i.title, p.nombre AS proyecto, i.eisenhower, i.due_date, i.status, i.fuente, i.nota_titulo
@@ -23,6 +25,7 @@ export async function pendientes(q) {
   }));
 }
 
+// Aplica lo que cambió en la carpeta: hechas, renombradas y nuevas.
 export async function sincronizar(q, b, { fuente = "carpeta" } = {}) {
   await core.lockTimer(q);
   const cambios = { hechas: 0, renombradas: 0, nuevas: 0 };
@@ -54,6 +57,7 @@ export async function sincronizar(q, b, { fuente = "carpeta" } = {}) {
   return cambios;
 }
 
+// Rutas /api/carpeta (token jdc_).
 export function rutas(app, { pool, tx, need, wrap, changed, empujar }) {
   app.get("/api/carpeta/pendientes", need, wrap(async (req, res) => res.json({ tareas: await pendientes(pool) })));
   app.post("/api/carpeta/sync", need, wrap(async (req, res) => {

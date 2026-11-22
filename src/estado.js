@@ -4,8 +4,10 @@ import { sugerencias } from "./plan.js";
 import { getPrediccion, habitosConModo, paraSugerir, rutinasPermitidas } from "./prediccion.js";
 import { getSetting } from "./db.js";
 
+// Fecha a milisegundos (null si no hay).
 const ms = (d) => (d ? new Date(d).getTime() : null);
 
+// Sesiones de los últimos días con su duración, para detectar hábitos.
 export async function sessionsForHabits(q, now, dias = 35) {
   const r = await q.query(
     `SELECT s.item_id, s.title, s.started_at,
@@ -16,6 +18,7 @@ export async function sessionsForHabits(q, now, dias = 35) {
   return r.rows.map((x) => ({ item_id: x.item_id, title: x.title, started_at: ms(x.started_at), dur_ms: Number(x.dur_ms) }));
 }
 
+// Sesión en curso con sus tramos.
 export async function currentSession(q) {
   const s = (await q.query("SELECT * FROM sessions WHERE state IN ('running','paused')")).rows[0];
   if (!s) return null;
@@ -26,6 +29,7 @@ export async function currentSession(q) {
   };
 }
 
+// Bloques y eventos de calendario dentro de un rango.
 export async function agendaRange(q, from, to) {
   const [blocks, events] = await Promise.all([
     q.query("SELECT b.*, c.name AS calendario FROM blocks b LEFT JOIN calendars c ON c.id=b.calendar_id WHERE b.borrado IS NULL AND b.starts_at < $2 AND b.ends_at > $1 ORDER BY b.starts_at", [new Date(from), new Date(to)]),
@@ -42,6 +46,7 @@ export async function agendaRange(q, from, to) {
   };
 }
 
+// Estado completo que pinta la app: ahora, agenda, tareas, sugerencias, proyectos y conexiones.
 export async function buildState(q, { tz, now = Date.now() }) {
   const day = startOfDay(now, tz), tomorrow = addDays(day, 1, tz);
   const pred = await getPrediccion(q);
