@@ -1,0 +1,334 @@
+TAP version 13
+# Subtest: cada token abre solo lo suyo
+ok 1 - cada token abre solo lo suyo
+  ---
+  duration_ms: 357.623917
+  type: 'test'
+  ...
+# Subtest: la cola respeta vencimiento, proyecto foco y prioridad
+ok 2 - la cola respeta vencimiento, proyecto foco y prioridad
+  ---
+  duration_ms: 37.181542
+  type: 'test'
+  ...
+# Subtest: WhatsApp primero: mientras el asistente conversa, el carril local espera
+ok 3 - WhatsApp primero: mientras el asistente conversa, el carril local espera
+  ---
+  duration_ms: 7.761958
+  type: 'test'
+  ...
+# Subtest: cloud solo con tu OK
+ok 4 - cloud solo con tu OK
+  ---
+  duration_ms: 11.237167
+  type: 'test'
+  ...
+# Subtest: aprobar deja la tarea hecha; contexto e infra
+ok 5 - aprobar deja la tarea hecha; contexto e infra
+  ---
+  duration_ms: 20.911833
+  type: 'test'
+  ...
+# Subtest: las tareas abandonadas vuelven a la cola
+ok 6 - las tareas abandonadas vuelven a la cola
+  ---
+  duration_ms: 6.916041
+  type: 'test'
+  ...
+# Subtest: apagar la Infraestructura corta el acceso de los agentes
+ok 7 - apagar la Infraestructura corta el acceso de los agentes
+  ---
+  duration_ms: 12.793459
+  type: 'test'
+  ...
+# Subtest: ventana nocturna y configuración
+ok 8 - ventana nocturna y configuración
+  ---
+  duration_ms: 0.15975
+  type: 'test'
+  ...
+# Subtest: proyecto por nombre, Eisenhower «Delegar» y error claro si no existe
+ok 9 - proyecto por nombre, Eisenhower «Delegar» y error claro si no existe
+  ---
+  duration_ms: 4.945166
+  type: 'test'
+  ...
+# Subtest: MCP: disponibilidad siempre; herramientas de agentes solo con Infraestructura
+ok 10 - MCP: disponibilidad siempre; herramientas de agentes solo con Infraestructura
+  ---
+  duration_ms: 19.518042
+  type: 'test'
+  ...
+# Subtest: instalación con código y entrada
+ok 11 - instalación con código y entrada
+  ---
+  duration_ms: 889.723417
+  type: 'test'
+  ...
+# Subtest: temporizador: una sola actividad abierta, toques cortos se descartan
+ok 12 - temporizador: una sola actividad abierta, toques cortos se descartan
+  ---
+  duration_ms: 71.841
+  type: 'test'
+  ...
+# Subtest: dos pedidos simultáneos no dejan dos actividades abiertas
+ok 13 - dos pedidos simultáneos no dejan dos actividades abiertas
+  ---
+  duration_ms: 20.2825
+  type: 'test'
+  ...
+# Subtest: atajos en texto simple con token
+ok 14 - atajos en texto simple con token
+  ---
+  duration_ms: 22.235125
+  type: 'test'
+  ...
+# Subtest: calendario iCal: el evento aparece en la agenda
+ok 15 - calendario iCal: el evento aparece en la agenda
+  ---
+  duration_ms: 4.529583
+  type: 'test'
+  ...
+# Subtest: vigilante: si hay algo agendado y no registras, avisa con botón para iniciarlo
+ok 16 - vigilante: si hay algo agendado y no registras, avisa con botón para iniciarlo
+  ---
+  duration_ms: 20.662542
+  type: 'test'
+  ...
+# Subtest: decide(): escalada 10/30/60 y repetición
+ok 17 - decide(): escalada 10/30/60 y repetición
+  ---
+  duration_ms: 0.879292
+  type: 'test'
+  ...
+# Subtest: armar mi día crea bloques con hábitos y no pisa el calendario
+ok 18 - armar mi día crea bloques con hábitos y no pisa el calendario
+  ---
+  duration_ms: 13.296166
+  type: 'test'
+  ...
+# Subtest: plantilla y feed de calendario
+ok 19 - plantilla y feed de calendario
+  ---
+  duration_ms: 5.141375
+  type: 'test'
+  ...
+# Subtest: plantillas: editar, probar y volver a la del equipo; modos del algoritmo
+ok 20 - plantillas: editar, probar y volver a la del equipo; modos del algoritmo
+  ---
+  duration_ms: 13.894334
+  type: 'test'
+  ...
+# Subtest: capas: fábrica < equipo < tuyas
+ok 21 - capas: fábrica < equipo < tuyas
+  ---
+  duration_ms: 9.878917
+  type: 'test'
+  ...
+# Subtest: acciones elegidas por plantilla
+ok 22 - acciones elegidas por plantilla
+  ---
+  duration_ms: 0.328875
+  type: 'test'
+  ...
+# Subtest: evento apagado: no avisa pero avanza el nivel
+ok 23 - evento apagado: no avisa pero avanza el nivel
+  ---
+  duration_ms: 0.082583
+  type: 'test'
+  ...
+# Subtest: aviso previo, una vez por bloque
+ok 24 - aviso previo, una vez por bloque
+  ---
+  duration_ms: 0.179292
+  type: 'test'
+  ...
+# Subtest: agendado mientras registras otra cosa: ofrece cambiar
+ok 25 - agendado mientras registras otra cosa: ofrece cambiar
+  ---
+  duration_ms: 0.131041
+  type: 'test'
+  ...
+# Subtest: se pasó de lo estimado
+ok 26 - se pasó de lo estimado
+  ---
+  duration_ms: 0.09225
+  type: 'test'
+  ...
+# Subtest: sanitize descarta lo inválido
+ok 27 - sanitize descarta lo inválido
+  ---
+  duration_ms: 0.120541
+  type: 'test'
+  ...
+# Subtest: modos del algoritmo
+ok 28 - modos del algoritmo
+  ---
+  duration_ms: 0.183125
+  type: 'test'
+  ...
+# Subtest: el token de carpeta solo abre la carpeta
+ok 29 - el token de carpeta solo abre la carpeta
+  ---
+  duration_ms: 205.886833
+  type: 'test'
+  ...
+# Subtest: configurar escribe Pendientes.md con las tareas del servidor
+ok 30 - configurar escribe Pendientes.md con las tareas del servidor
+  ---
+  duration_ms: 167.309375
+  type: 'test'
+  ...
+# Subtest: marcar, renombrar y agregar en el archivo llega a Veredicto
+ok 31 - marcar, renombrar y agregar en el archivo llega a Veredicto
+  ---
+  duration_ms: 124.7395
+  type: 'test'
+  ...
+# Subtest: lo que cambia en Veredicto aparece en el archivo
+ok 32 - lo que cambia en Veredicto aparece en el archivo
+  ---
+  duration_ms: 60.941417
+  type: 'test'
+  ...
+# Subtest: un archivo por proyecto
+ok 33 - un archivo por proyecto
+  ---
+  duration_ms: 114.946791
+  type: 'test'
+  ...
+# Subtest: MAPA-CODIGO.md al día y sin funciones sin comentario
+ok 34 - MAPA-CODIGO.md al día y sin funciones sin comentario
+  ---
+  duration_ms: 51.909666
+  type: 'test'
+  ...
+# Subtest: cifrado: ida y vuelta, y no se lee con otra clave
+ok 35 - cifrado: ida y vuelta, y no se lee con otra clave
+  ---
+  duration_ms: 497.884083
+  type: 'test'
+  ...
+# Subtest: Markdown: casillas a gestiones, en ambos sentidos, y bandeja
+ok 36 - Markdown: casillas a gestiones, en ambos sentidos, y bandeja
+  ---
+  duration_ms: 96.952625
+  type: 'test'
+  ...
+# Subtest: Markdown: identidad de casillas repetidas y fechas
+ok 37 - Markdown: identidad de casillas repetidas y fechas
+  ---
+  duration_ms: 0.156084
+  type: 'test'
+  ...
+# Subtest: Notion: casillas en ambos sentidos
+ok 38 - Notion: casillas en ambos sentidos
+  ---
+  duration_ms: 25.163708
+  type: 'test'
+  ...
+# Subtest: CalDAV (Radicale): bloques al calendario Plan y cambios de afuera
+ok 39 - CalDAV (Radicale): bloques al calendario Plan y cambios de afuera
+  ---
+  duration_ms: 1900.379042
+  type: 'test'
+  ...
+# Subtest: patchICS conserva invitados y alarmas
+ok 40 - patchICS conserva invitados y alarmas
+  ---
+  duration_ms: 0.64425
+  type: 'test'
+  ...
+# Subtest: Google: lee instancias y escribe con If-Match
+ok 41 - Google: lee instancias y escribe con If-Match
+  ---
+  duration_ms: 1.861833
+  type: 'test'
+  ...
+# Subtest: Notion Flujo: de idea a bloque en el calendario y tiempo de vuelta
+ok 42 - Notion Flujo: de idea a bloque en el calendario y tiempo de vuelta
+  ---
+  duration_ms: 338.508917
+  type: 'test'
+  ...
+# Subtest: tras un cambio en la app, la cola sale sola en segundos
+ok 43 - tras un cambio en la app, la cola sale sola en segundos
+  ---
+  duration_ms: 2580.229833
+  type: 'test'
+  ...
+# Subtest: iCal: semanal con zona, excepción y cancelación
+ok 44 - iCal: semanal con zona, excepción y cancelación
+  ---
+  duration_ms: 10.215833
+  type: 'test'
+  ...
+# Subtest: hábitos: transporte 08:10 de lunes a viernes se agenda solo
+ok 45 - hábitos: transporte 08:10 de lunes a viernes se agenda solo
+  ---
+  duration_ms: 1.280834
+  type: 'test'
+  ...
+# Subtest: enlaces firmados vencen y no se pueden alterar
+ok 46 - enlaces firmados vencen y no se pueden alterar
+  ---
+  duration_ms: 0.538208
+  type: 'test'
+  ...
+# Subtest: horario que cruza medianoche
+ok 47 - horario que cruza medianoche
+  ---
+  duration_ms: 0.063125
+  type: 'test'
+  ...
+# Subtest: la cookie es Secure solo si llegó por https
+ok 48 - la cookie es Secure solo si llegó por https
+  ---
+  duration_ms: 1211.008709
+  type: 'test'
+  ...
+# Subtest: proyectos: pilar, proyecto, tareas agrupadas y minutos medidos
+ok 49 - proyectos: pilar, proyecto, tareas agrupadas y minutos medidos
+  ---
+  duration_ms: 64.023708
+  type: 'test'
+  ...
+# Subtest: modo demo: carga, no se duplica y se borra sin tocar lo tuyo
+ok 50 - modo demo: carga, no se duplica y se borra sin tocar lo tuyo
+  ---
+  duration_ms: 48.390083
+  type: 'test'
+  ...
+# Subtest: ActivityWatch: tramos sin tiempo inactivo, y registrarlos crea la sesión
+ok 51 - ActivityWatch: tramos sin tiempo inactivo, y registrarlos crea la sesión
+  ---
+  duration_ms: 10.698125
+  type: 'test'
+  ...
+# Subtest: MCP: tu asistente lista herramientas, inicia en un proyecto y para
+ok 52 - MCP: tu asistente lista herramientas, inicia en un proyecto y para
+  ---
+  duration_ms: 19.66775
+  type: 'test'
+  ...
+# Subtest: Notion: crea las 9 bases, Flujo con Proyecto, la guía, y las llena
+ok 53 - Notion: crea las 9 bases, Flujo con Proyecto, la guía, y las llena
+  ---
+  duration_ms: 34.928208
+  type: 'test'
+  ...
+# Subtest: Notion: adopta las «TimeMachine - …» del Juez antiguo e importa su historial
+ok 54 - Notion: adopta las «TimeMachine - …» del Juez antiguo e importa su historial
+  ---
+  duration_ms: 4.021334
+  type: 'test'
+  ...
+1..54
+# tests 54
+# suites 0
+# pass 54
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 11389.409667
